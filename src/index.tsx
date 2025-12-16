@@ -510,9 +510,29 @@ app.get('/*', (c) => {
     .rating-table td { padding: 10px 8px; text-align: center; border-bottom: 1px solid #f2f3f5; }
     .rating-table tbody tr:hover { background: #f7f8fa; }
     .rating-comment { background: #f7f8fa; padding: 10px 12px; border-radius: 6px; margin-top: 8px; font-size: 13px; color: #4e5969; line-height: 1.5; }
-    /* 表格单行不换行 */
-    .arco-table-th-title { white-space: nowrap; }
-    .arco-table-cell { white-space: nowrap; }
+    /* 表格样式修复 - 强制表头单行显示 */
+    .arco-table th,
+    .arco-table-th,
+    .arco-table-th-title,
+    .arco-table-th-item,
+    .arco-table-cell,
+    .arco-table .arco-table-th,
+    .arco-table .arco-table-th-item,
+    .arco-table .arco-table-th-title,
+    .arco-table thead th,
+    .arco-table thead .arco-table-th {
+      white-space: nowrap !important;
+      word-break: keep-all !important;
+      overflow: visible !important;
+      text-overflow: clip !important;
+    }
+    .arco-table-th { vertical-align: middle !important; }
+    .arco-table-th-item { display: flex !important; align-items: center !important; justify-content: inherit !important; }
+    .arco-table-td { vertical-align: middle !important; }
+    .table-card .arco-table { font-size: 13px; }
+    .table-card .arco-table-header { background: #fafafa; }
+    .table-card .arco-table-th-item { padding: 14px 12px !important; font-weight: 500; }
+    .table-card .arco-table-td { padding: 14px 12px !important; }
     /* 评分弹框优化 */
     .score-input-group { display: flex; flex-direction: column; gap: 12px; }
     .score-input-row { display: flex; align-items: center; gap: 12px; padding: 12px 16px; background: #f7f8fa; border-radius: 8px; }
@@ -692,36 +712,35 @@ app.get('/*', (c) => {
               <div style="font-size: 16px; color: #4e5969; margin-bottom: 8px;">暂无剧本数据</div>
               <div style="font-size: 13px; color: #86909c;">{{ hasActiveFilters ? '尝试调整筛选条件' : '点击右上角按钮新建剧本' }}</div>
             </div>
-            <a-table v-else :data="scripts" :pagination="pagination" :loading="loading" @page-change="onPageChange" row-key="script_id">
+            <a-table v-else :data="scripts" :pagination="pagination" :loading="loading" @page-change="onPageChange" row-key="script_id" :bordered="false" :scroll="{x: 1300}" table-layout-fixed>
               <template #columns>
-                <a-table-column title="编号" data-index="script_id" :width="90" />
-                <a-table-column title="剧本名称" :width="200">
+                <a-table-column title="编号" data-index="script_id" :width="80" />
+                <a-table-column title="剧本名称" :width="180">
                   <template #cell="{ record }">
                     <div style="font-weight: 500;">{{ record.name }}</div>
-                    <div style="font-size: 12px; color: #86909c;">{{ record.genre }} · {{ record.content_type }}</div>
                   </template>
                 </a-table-column>
-                <a-table-column title="编剧" data-index="writer" :width="90" />
-                <a-table-column title="内容团队" data-index="content_team" :width="100" />
-                <a-table-column title="制片" data-index="producer" :width="90" />
-                <a-table-column title="制片团队" data-index="producer_team" :width="100" />
-                <a-table-column title="综合评分" :width="90" align="center">
+                <a-table-column title="编剧" data-index="writer" :width="80" />
+                <a-table-column title="内容团队" data-index="content_team" :width="90" />
+                <a-table-column title="制片" data-index="producer" :width="80" />
+                <a-table-column title="制片团队" data-index="producer_team" :width="90" />
+                <a-table-column title="评分" :width="70" align="center">
                   <template #cell="{ record }">
                     <span :class="'score-badge score-' + getScoreClass(record.avg_score)">{{ record.avg_score?.toFixed(1) || '-' }}</span>
                   </template>
                 </a-table-column>
-                <a-table-column title="状态" :width="90" align="center">
+                <a-table-column title="状态" :width="100" align="center">
                   <template #cell="{ record }">
                     <a-tag size="small" :color="getStatusColor(record.status)">{{ record.status }}</a-tag>
                   </template>
                 </a-table-column>
-                <a-table-column title="立项" :width="140" align="center">
+                <a-table-column title="立项" :width="60" align="center">
                   <template #cell="{ record }">
-                    <div v-if="record.is_project" class="project-badge">✅ {{ record.project_name || record.script_id }}</div>
+                    <span v-if="record.is_project" style="color: #00b42a;">✅</span>
                     <span v-else style="color: #c9cdd4;">-</span>
                   </template>
                 </a-table-column>
-                <a-table-column title="操作" :width="180" align="center" fixed="right">
+                <a-table-column title="操作" :width="160" align="center" fixed="right">
                   <template #cell="{ record }">
                     <a-space>
                       <a-button type="text" size="small" @click="openFeishu(record)">
@@ -771,33 +790,32 @@ app.get('/*', (c) => {
           </div>
           
           <div class="table-card">
-            <a-table :data="ratings" :pagination="ratingPagination" :loading="loading" @page-change="onRatingPageChange" row-key="id" :bordered="false">
+            <a-table :data="ratings" :pagination="ratingPagination" :loading="loading" @page-change="onRatingPageChange" row-key="id" :bordered="false" :scroll="{x: 1100}" table-layout-fixed>
               <template #columns>
-                <a-table-column title="剧本编号" data-index="script_id" :width="100" />
-                <a-table-column title="剧本名称" :width="180">
-                  <template #cell="{ record }">{{ record.script_name || '-' }}</template>
-                </a-table-column>
-                <a-table-column title="评分人" :width="100">
-                  <template #cell="{ record }">{{ record.user_name }}</template>
-                </a-table-column>
-                <a-table-column title="角色" :width="80" align="center">
+                <a-table-column title="剧本" :width="180">
                   <template #cell="{ record }">
+                    <div style="font-weight: 500;">{{ record.script_name || record.script_id }}</div>
+                  </template>
+                </a-table-column>
+                <a-table-column title="评分人" :width="120">
+                  <template #cell="{ record }">
+                    {{ record.user_name }}
                     <span :class="'role-tag ' + (record.role_type || record.user_role)">{{ record.role_type || record.user_role }}</span>
                   </template>
                 </a-table-column>
-                <a-table-column title="内容分" data-index="content_score" :width="80" align="center" />
-                <a-table-column title="题材分" data-index="market_score" :width="80" align="center" />
-                <a-table-column title="制作分" data-index="commercial_score" :width="80" align="center" />
-                <a-table-column title="综合分" :width="80" align="center">
+                <a-table-column title="内容" data-index="content_score" :width="70" align="center" />
+                <a-table-column title="题材" data-index="market_score" :width="70" align="center" />
+                <a-table-column title="制作" data-index="commercial_score" :width="70" align="center" />
+                <a-table-column title="综合" :width="70" align="center">
                   <template #cell="{ record }">
                     <span style="font-weight: 600; color: #165dff;">{{ record.total_score?.toFixed(1) || '-' }}</span>
                   </template>
                 </a-table-column>
-                <a-table-column title="评分时间" data-index="rating_date" :width="110" />
-                <a-table-column title="评语" :width="180">
+                <a-table-column title="时间" data-index="rating_date" :width="100" />
+                <a-table-column title="评语">
                   <template #cell="{ record }">
                     <a-tooltip v-if="record.comments" :content="record.comments">
-                      <span style="color: #86909c; cursor: pointer;">{{ record.comments?.slice(0, 15) }}{{ record.comments?.length > 15 ? '...' : '' }}</span>
+                      <span style="color: #86909c; cursor: pointer;">{{ record.comments?.slice(0, 20) }}{{ record.comments?.length > 20 ? '...' : '' }}</span>
                     </a-tooltip>
                     <span v-else style="color: #c9cdd4;">-</span>
                   </template>
@@ -815,9 +833,9 @@ app.get('/*', (c) => {
           </div>
           
           <div class="table-card">
-            <a-table :data="rankings" :pagination="false" row-key="script_id">
+            <a-table :data="rankings" :pagination="false" row-key="script_id" :bordered="false" :scroll="{x: 950}" table-layout-fixed>
               <template #columns>
-                <a-table-column title="排名" :width="80" align="center">
+                <a-table-column title="排名" :width="70" align="center">
                   <template #cell="{ record }">
                     <span v-if="record.medal" style="font-size: 24px;">{{ record.medal }}</span>
                     <span v-else style="font-size: 16px; color: #86909c;">#{{ record.rank }}</span>
