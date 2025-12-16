@@ -467,6 +467,24 @@ app.get('/*', (c) => {
     .script-info-row { display: flex; margin-bottom: 8px; }
     .script-info-label { color: #86909c; width: 80px; flex-shrink: 0; }
     .script-info-value { color: #1d2129; flex: 1; }
+    /* 新增优化样式 */
+    .empty-state { text-align: center; padding: 60px 20px; }
+    .danger-option { color: #f53f3f !important; }
+    .danger-option:hover { background: #ffece8 !important; }
+    .score-legend { background: #f7f8fa; border-radius: 8px; padding: 12px 16px; margin-bottom: 16px; }
+    .score-legend-title { font-size: 12px; color: #86909c; margin-bottom: 8px; }
+    .score-legend-items { display: flex; gap: 8px; flex-wrap: wrap; }
+    .score-legend-items .score-badge { font-size: 11px; padding: 2px 8px; }
+    .score-indicator { font-size: 11px; font-weight: 500; padding: 1px 4px; border-radius: 2px; }
+    .score-indicator.score-s { color: #722ed1; background: #f5f0ff; }
+    .score-indicator.score-a { color: #f5576c; background: #ffece8; }
+    .score-indicator.score-b { color: #165dff; background: #e8f3ff; }
+    .score-indicator.score-c { color: #86909c; background: #f2f3f5; }
+    .predicted-score { display: flex; align-items: center; gap: 8px; padding: 12px 16px; background: linear-gradient(135deg, #f0f5ff 0%, #e8f3ff 100%); border-radius: 8px; margin-bottom: 16px; font-size: 14px; }
+    .predicted-score .score-badge { font-size: 16px; padding: 4px 12px; }
+    .arco-radio-group-button { border-radius: 6px !important; }
+    .arco-badge { margin-left: 4px; }
+    .arco-badge .arco-badge-number { font-size: 10px; min-width: 16px; height: 16px; line-height: 16px; padding: 0 4px; }
   </style>
 </head>
 <body>
@@ -554,36 +572,57 @@ app.get('/*', (c) => {
         
         <!-- 剧本管理 -->
         <div v-if="currentPage === 'scripts'">
-          <div class="page-header">
-            <h1 class="page-title">剧本管理</h1>
-            <p class="page-desc">管理和筛选所有剧本</p>
+          <div class="page-header" style="display: flex; justify-content: space-between; align-items: flex-start;">
+            <div>
+              <h1 class="page-title">剧本管理</h1>
+              <p class="page-desc">管理和筛选所有剧本</p>
+            </div>
+            <a-button type="primary" @click="openCreateModal">
+              <template #icon><icon-plus /></template>新建剧本
+            </a-button>
           </div>
           
-          <a-tabs v-model:active-key="scriptTab" @change="loadScripts">
-            <a-tab-pane key="all" title="全部" />
-            <a-tab-pane key="pending" title="待分配" />
-          </a-tabs>
-          
-          <div class="filter-bar">
-            <a-space wrap>
-              <a-select v-model="scriptFilters.status" placeholder="剧本状态" allow-clear style="width: 130px;" @change="loadScripts">
+          <div class="filter-bar" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+            <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+              <!-- Tab切换 带数量徽标 -->
+              <a-radio-group v-model="scriptTab" type="button" size="small" @change="loadScripts">
+                <a-radio value="all">全部 <a-badge :count="tabCounts.all" :max-count="999" :dot-style="{background: '#165dff'}" /></a-radio>
+                <a-radio value="pending">待分配 <a-badge :count="tabCounts.pending" :max-count="999" :dot-style="{background: '#ff7d00'}" /></a-radio>
+              </a-radio-group>
+              <a-divider direction="vertical" style="height: 24px; margin: 0 8px;" />
+              
+              <!-- 基础筛选 -->
+              <a-select v-model="scriptFilters.status" placeholder="剧本状态" allow-clear style="width: 120px;" @change="loadScripts" size="small">
                 <a-option v-for="s in options.statuses" :key="s" :value="s">{{ s }}</a-option>
               </a-select>
-              <a-select v-model="scriptFilters.content_team" placeholder="内容团队" allow-clear style="width: 130px;" @change="loadScripts">
+              <a-select v-model="scriptFilters.content_team" placeholder="内容团队" allow-clear style="width: 120px;" @change="loadScripts" size="small">
                 <a-option v-for="t in options.contentTeams" :key="t" :value="t">{{ t }}</a-option>
               </a-select>
-              <a-select v-model="scriptFilters.genre" placeholder="内容类型" allow-clear style="width: 130px;" @change="loadScripts">
+              <a-select v-model="scriptFilters.genre" placeholder="内容类型" allow-clear style="width: 100px;" @change="loadScripts" size="small">
                 <a-option value="男频">男频</a-option>
                 <a-option value="女频">女频</a-option>
                 <a-option value="皆可">皆可</a-option>
               </a-select>
-              <a-input-search v-model="scriptFilters.keyword" placeholder="搜索剧本/编剧" allow-clear style="width: 200px;" @search="loadScripts" @press-enter="loadScripts" />
-              <a-range-picker v-model="scriptDateRange" @change="loadScripts" allow-clear placeholder="['投稿开始', '投稿结束']" style="width: 260px;" />
-            </a-space>
+              <a-range-picker v-model="scriptDateRange" @change="loadScripts" allow-clear :placeholder="['开始日期', '结束日期']" style="width: 220px;" size="small" />
+              
+              <!-- 重置筛选按钮 -->
+              <a-button size="small" @click="resetScriptFilters" :disabled="!hasActiveFilters">
+                <template #icon><icon-refresh /></template>重置
+              </a-button>
+            </div>
+            
+            <!-- 搜索框独立右侧 -->
+            <a-input-search v-model="scriptFilters.keyword" placeholder="搜索剧本名称/编号/编剧" allow-clear style="width: 260px;" @search="loadScripts" @press-enter="loadScripts" />
           </div>
           
           <div class="table-card">
-            <a-table :data="scripts" :pagination="pagination" :loading="loading" @page-change="onPageChange" row-key="script_id">
+            <!-- 空状态 -->
+            <div v-if="!loading && scripts.length === 0" class="empty-state">
+              <icon-inbox style="font-size: 56px; color: #c9cdd4; margin-bottom: 16px;" />
+              <div style="font-size: 16px; color: #4e5969; margin-bottom: 8px;">暂无剧本数据</div>
+              <div style="font-size: 13px; color: #86909c;">{{ hasActiveFilters ? '尝试调整筛选条件' : '点击右上角按钮新建剧本' }}</div>
+            </div>
+            <a-table v-else :data="scripts" :pagination="pagination" :loading="loading" @page-change="onPageChange" row-key="script_id">
               <template #columns>
                 <a-table-column title="编号" data-index="script_id" :width="90" />
                 <a-table-column title="剧本名称" :width="200">
@@ -614,23 +653,31 @@ app.get('/*', (c) => {
                     <span v-else style="color: #c9cdd4;">-</span>
                   </template>
                 </a-table-column>
-                <a-table-column title="操作" :width="220" align="center" fixed="right">
+                <a-table-column title="操作" :width="180" align="center" fixed="right">
                   <template #cell="{ record }">
                     <a-space>
                       <a-button type="text" size="small" @click="openFeishu(record)">
                         <template #icon><icon-file /></template>看剧本
                       </a-button>
-                      <a-button type="text" size="small" status="warning" @click="openRatingDrawer(record)">
+                      <a-button type="primary" size="mini" @click="openRatingDrawer(record)">
                         <template #icon><icon-star /></template>去评分
                       </a-button>
-                      <a-button type="text" size="small" @click="openEditModal(record)">
-                        <template #icon><icon-edit /></template>
-                      </a-button>
-                      <a-popconfirm content="确定删除该剧本？此操作不可恢复" @ok="deleteScript(record.script_id)">
-                        <a-button type="text" size="small" status="danger">
-                          <template #icon><icon-delete /></template>
+                      <a-dropdown trigger="hover">
+                        <a-button type="text" size="small">
+                          <template #icon><icon-more /></template>
                         </a-button>
-                      </a-popconfirm>
+                        <template #content>
+                          <a-doption @click="openEditModal(record)">
+                            <template #icon><icon-edit /></template>编辑剧本
+                          </a-doption>
+                          <a-doption @click="copyScriptInfo(record)">
+                            <template #icon><icon-copy /></template>复制信息
+                          </a-doption>
+                          <a-doption class="danger-option" @click="confirmDeleteScript(record.script_id)">
+                            <template #icon><icon-delete /></template>删除剧本
+                          </a-doption>
+                        </template>
+                      </a-dropdown>
                     </a-space>
                   </template>
                 </a-table-column>
@@ -809,30 +856,61 @@ app.get('/*', (c) => {
     </a-drawer>
     
     <!-- 评分弹框 -->
-    <a-modal v-model:visible="ratingModalVisible" title="提交评分" @ok="submitRating" :ok-loading="submitting" ok-text="提交" cancel-text="取消">
+    <a-modal v-model:visible="ratingModalVisible" title="提交评分" @ok="submitRating" :ok-loading="submitting" ok-text="提交" cancel-text="取消" :width="520">
       <a-form :model="ratingForm" layout="vertical">
         <a-form-item label="评分人" required>
           <a-select v-model="ratingForm.user_id" placeholder="选择评分人">
             <a-option v-for="u in users" :key="u.user_id" :value="u.user_id">{{ u.name }} ({{ u.role_type }})</a-option>
           </a-select>
         </a-form-item>
+        
+        <!-- 评分等级说明 -->
+        <div class="score-legend">
+          <div class="score-legend-title">评分等级参考</div>
+          <div class="score-legend-items">
+            <span class="score-badge score-s">S级 90-100</span>
+            <span class="score-badge score-a">A级 80-89</span>
+            <span class="score-badge score-b">B级 70-79</span>
+            <span class="score-badge score-c">C级 &lt;70</span>
+          </div>
+        </div>
+        
         <a-row :gutter="16">
           <a-col :span="8">
             <a-form-item label="内容评分">
-              <a-input-number v-model="ratingForm.content_score" :min="0" :max="100" placeholder="0-100" style="width: 100%;" />
+              <a-input-number v-model="ratingForm.content_score" :min="0" :max="100" :step="5" placeholder="0-100" style="width: 100%;">
+                <template #suffix>
+                  <span :class="'score-indicator score-' + getScoreClass(ratingForm.content_score)">{{ getScoreLevelText(ratingForm.content_score) }}</span>
+                </template>
+              </a-input-number>
             </a-form-item>
           </a-col>
           <a-col :span="8">
             <a-form-item label="题材评分">
-              <a-input-number v-model="ratingForm.market_score" :min="0" :max="100" placeholder="0-100" style="width: 100%;" />
+              <a-input-number v-model="ratingForm.market_score" :min="0" :max="100" :step="5" placeholder="0-100" style="width: 100%;">
+                <template #suffix>
+                  <span :class="'score-indicator score-' + getScoreClass(ratingForm.market_score)">{{ getScoreLevelText(ratingForm.market_score) }}</span>
+                </template>
+              </a-input-number>
             </a-form-item>
           </a-col>
           <a-col :span="8">
             <a-form-item label="制作评分">
-              <a-input-number v-model="ratingForm.commercial_score" :min="0" :max="100" placeholder="0-100" style="width: 100%;" />
+              <a-input-number v-model="ratingForm.commercial_score" :min="0" :max="100" :step="5" placeholder="0-100" style="width: 100%;">
+                <template #suffix>
+                  <span :class="'score-indicator score-' + getScoreClass(ratingForm.commercial_score)">{{ getScoreLevelText(ratingForm.commercial_score) }}</span>
+                </template>
+              </a-input-number>
             </a-form-item>
           </a-col>
         </a-row>
+        
+        <!-- 预计综合分 -->
+        <div v-if="predictedScore !== null" class="predicted-score">
+          <span>预计综合分：</span>
+          <span :class="'score-badge score-' + getScoreClass(predictedScore)">{{ predictedScore.toFixed(1) }}</span>
+        </div>
+        
         <a-form-item label="评分意见">
           <a-textarea v-model="ratingForm.comments" placeholder="请输入评分意见（选填）" :auto-size="{ minRows: 3, maxRows: 6 }" />
         </a-form-item>
@@ -952,6 +1030,90 @@ app.get('/*', (c) => {
         </a-form-item>
       </a-form>
     </a-modal>
+    
+    <!-- 新建剧本弹框 -->
+    <a-modal v-model:visible="createModalVisible" title="新建剧本" @ok="submitCreateScript" :ok-loading="submitting" ok-text="创建" cancel-text="取消" :width="600">
+      <a-form :model="createForm" layout="vertical">
+        <a-row :gutter="16">
+          <a-col :span="12">
+            <a-form-item label="剧本名称" required>
+              <a-input v-model="createForm.name" placeholder="请输入剧本名称" />
+            </a-form-item>
+          </a-col>
+          <a-col :span="12">
+            <a-form-item label="飞书文档地址">
+              <a-input v-model="createForm.feishu_url" placeholder="请输入飞书文档URL" />
+            </a-form-item>
+          </a-col>
+        </a-row>
+        <a-row :gutter="16">
+          <a-col :span="8">
+            <a-form-item label="来源类型">
+              <a-select v-model="createForm.source_type" placeholder="选择来源">
+                <a-option value="内部团队">内部团队</a-option>
+                <a-option value="外部投稿">外部投稿</a-option>
+                <a-option value="合作编剧">合作编剧</a-option>
+                <a-option value="版权采购">版权采购</a-option>
+              </a-select>
+            </a-form-item>
+          </a-col>
+          <a-col :span="8">
+            <a-form-item label="剧本状态">
+              <a-select v-model="createForm.status" placeholder="选择状态">
+                <a-option value="一卡初稿">一卡初稿</a-option>
+                <a-option value="改稿中">改稿中</a-option>
+                <a-option value="完整剧本">完整剧本</a-option>
+                <a-option value="终稿">终稿</a-option>
+              </a-select>
+            </a-form-item>
+          </a-col>
+          <a-col :span="8">
+            <a-form-item label="内容类型">
+              <a-select v-model="createForm.genre" placeholder="选择类型">
+                <a-option value="男频">男频</a-option>
+                <a-option value="女频">女频</a-option>
+                <a-option value="皆可">皆可</a-option>
+              </a-select>
+            </a-form-item>
+          </a-col>
+        </a-row>
+        <a-row :gutter="16">
+          <a-col :span="12">
+            <a-form-item label="所属编剧">
+              <a-select v-model="createForm.writer" placeholder="选择编剧" allow-clear>
+                <a-option v-for="w in options.writers" :key="w" :value="w">{{ w }}</a-option>
+              </a-select>
+            </a-form-item>
+          </a-col>
+          <a-col :span="12">
+            <a-form-item label="内容团队">
+              <a-select v-model="createForm.content_team" placeholder="选择内容团队" allow-clear>
+                <a-option v-for="t in options.contentTeams" :key="t" :value="t">{{ t }}</a-option>
+              </a-select>
+            </a-form-item>
+          </a-col>
+        </a-row>
+        <a-row :gutter="16">
+          <a-col :span="12">
+            <a-form-item label="所属制片">
+              <a-select v-model="createForm.producer" placeholder="选择制片" allow-clear>
+                <a-option v-for="p in options.producers" :key="p" :value="p">{{ p }}</a-option>
+              </a-select>
+            </a-form-item>
+          </a-col>
+          <a-col :span="12">
+            <a-form-item label="制片团队">
+              <a-select v-model="createForm.producer_team" placeholder="选择制片团队" allow-clear>
+                <a-option v-for="t in options.producerTeams" :key="t" :value="t">{{ t }}</a-option>
+              </a-select>
+            </a-form-item>
+          </a-col>
+        </a-row>
+        <a-form-item label="备注">
+          <a-textarea v-model="createForm.remarks" placeholder="请输入备注信息（选填）" :auto-size="{ minRows: 2 }" />
+        </a-form-item>
+      </a-form>
+    </a-modal>
   </div>
   
   <script>
@@ -997,13 +1159,39 @@ app.get('/*', (c) => {
           assign_status: '', is_project: false, project_name: '', remarks: '' 
         });
         
+        // Tab计数
+        const tabCounts = ref({ all: 0, pending: 0 });
+        
         // 工具函数
-        const getScoreClass = (score) => { if (!score) return 'c'; if (score >= 80) return 's'; if (score >= 70) return 'a'; if (score >= 60) return 'b'; return 'c'; };
-        const getScoreColor = (score) => { if (!score) return '#86909c'; if (score >= 80) return '#722ed1'; if (score >= 70) return '#165dff'; if (score >= 60) return '#00b42a'; return '#ff7d00'; };
+        const getScoreClass = (score) => { if (!score) return 'c'; if (score >= 90) return 's'; if (score >= 80) return 'a'; if (score >= 70) return 'b'; return 'c'; };
+        const getScoreColor = (score) => { if (!score) return '#86909c'; if (score >= 90) return '#722ed1'; if (score >= 80) return '#f5576c'; if (score >= 70) return '#165dff'; return '#ff7d00'; };
         const getStatusColor = (status) => { 
           const map = { '一卡初稿': 'blue', '改稿中': 'orange', '完整剧本': 'green', '终稿': 'purple', '一卡': 'blue', '全本': 'green' }; 
           return map[status] || 'gray'; 
         };
+        const getScoreLevelText = (score) => { if (!score) return ''; if (score >= 90) return 'S'; if (score >= 80) return 'A'; if (score >= 70) return 'B'; return 'C'; };
+        
+        // 筛选重置和状态
+        const hasActiveFilters = computed(() => {
+          return scriptFilters.status || scriptFilters.content_team || scriptFilters.genre || 
+                 scriptFilters.keyword || scriptDateRange.value?.length > 0;
+        });
+        
+        const resetScriptFilters = () => {
+          scriptFilters.status = '';
+          scriptFilters.content_team = '';
+          scriptFilters.genre = '';
+          scriptFilters.keyword = '';
+          scriptDateRange.value = [];
+          loadScripts();
+        };
+        
+        // 预计综合分
+        const predictedScore = computed(() => {
+          const scores = [ratingForm.content_score, ratingForm.market_score, ratingForm.commercial_score].filter(s => s !== null && s !== undefined && s !== '');
+          if (scores.length === 0) return null;
+          return scores.reduce((a, b) => a + b, 0) / scores.length;
+        });
         
         // API
         const loadDashboard = async () => {
@@ -1066,6 +1254,22 @@ app.get('/*', (c) => {
           scripts.value = res.data.data;
           pagination.total = res.data.total;
           loading.value = false;
+          
+          // 加载Tab计数
+          loadTabCounts();
+        };
+        
+        const loadTabCounts = async () => {
+          try {
+            const [allRes, pendingRes] = await Promise.all([
+              axios.get('/api/scripts?limit=1'),
+              axios.get('/api/scripts?tab=pending&limit=1')
+            ]);
+            tabCounts.value = {
+              all: allRes.data.total || 0,
+              pending: pendingRes.data.total || 0
+            };
+          } catch (e) { console.error('Failed to load tab counts', e); }
         };
         
         const loadRatings = async () => {
@@ -1180,6 +1384,56 @@ app.get('/*', (c) => {
           }
         };
         
+        const confirmDeleteScript = (id) => {
+          ArcoVue.Modal.warning({
+            title: '确认删除',
+            content: '删除后将无法恢复，确定要删除该剧本吗？',
+            okText: '确认删除',
+            cancelText: '取消',
+            onOk: () => deleteScript(id)
+          });
+        };
+        
+        const copyScriptInfo = (script) => {
+          const info = \`剧本名称：\${script.name}\\n编号：\${script.script_id}\\n编剧：\${script.writer || '-'}\\n内容团队：\${script.content_team || '-'}\\n评分：\${script.avg_score?.toFixed(1) || '-'}\\n状态：\${script.status}\\n飞书文档：\${script.feishu_url || '-'}\`;
+          navigator.clipboard.writeText(info).then(() => {
+            ArcoVue.Message.success('剧本信息已复制到剪贴板');
+          }).catch(() => {
+            ArcoVue.Message.error('复制失败，请手动复制');
+          });
+        };
+        
+        // 新建剧本
+        const createModalVisible = ref(false);
+        const createForm = reactive({ 
+          name: '', feishu_url: '', source_type: '内部团队', team: '', status: '一卡初稿', 
+          genre: '皆可', writer: '', content_team: '', producer: '', producer_team: '', 
+          assign_status: '待分配', is_project: false, project_name: '', remarks: '' 
+        });
+        
+        const openCreateModal = () => {
+          Object.assign(createForm, {
+            name: '', feishu_url: '', source_type: '内部团队', team: '', status: '一卡初稿', 
+            genre: '皆可', writer: '', content_team: '', producer: '', producer_team: '', 
+            assign_status: '待分配', is_project: false, project_name: '', remarks: ''
+          });
+          createModalVisible.value = true;
+        };
+        
+        const submitCreateScript = async () => {
+          if (!createForm.name) { ArcoVue.Message.warning('请输入剧本名称'); return; }
+          submitting.value = true;
+          try {
+            await axios.post('/api/scripts', createForm);
+            ArcoVue.Message.success('剧本创建成功');
+            createModalVisible.value = false;
+            loadScripts();
+          } catch (e) {
+            ArcoVue.Message.error('创建失败: ' + (e.response?.data?.error || e.message));
+          }
+          submitting.value = false;
+        };
+        
         const goToScriptDetail = (script) => {
           currentPage.value = 'scripts';
           nextTick(() => {
@@ -1200,12 +1454,14 @@ app.get('/*', (c) => {
         });
         
         return {
-          currentPage, loading, submitting, kpi, scripts, ratings, rankings, users, options,
+          currentPage, loading, submitting, kpi, scripts, ratings, rankings, users, options, tabCounts,
           dateRange, scriptTab, scriptFilters, scriptDateRange, ratingFilters, ratingDateRange,
           pagination, ratingPagination, ratingDrawerVisible, ratingModalVisible, editModalVisible, currentScript, ratingForm, editForm,
-          getScoreClass, getScoreColor, getStatusColor, loadDashboard, loadScripts, loadRatings,
+          createModalVisible, createForm, hasActiveFilters, predictedScore,
+          getScoreClass, getScoreColor, getStatusColor, getScoreLevelText, loadDashboard, loadScripts, loadRatings,
           onPageChange, onRatingPageChange, openFeishu, openRatingDrawer, openRatingModal, submitRating, 
-          openEditModal, submitEditScript, deleteScript, goToScriptDetail
+          openEditModal, submitEditScript, deleteScript, goToScriptDetail, resetScriptFilters,
+          confirmDeleteScript, copyScriptInfo, openCreateModal, submitCreateScript
         };
       }
     });
