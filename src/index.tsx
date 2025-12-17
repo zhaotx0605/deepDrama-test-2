@@ -499,6 +499,21 @@ app.get('/*', (c) => {
     .arco-radio-group-button { border-radius: 6px !important; }
     .arco-badge { margin-left: 4px; }
     .arco-badge .arco-badge-number { font-size: 10px; min-width: 16px; height: 16px; line-height: 16px; padding: 0 4px; }
+    
+    /* 表格斑马纹和边框优化 */
+    .arco-table-stripe .arco-table-tr:nth-child(2n) .arco-table-td {
+      background-color: #fafafa;
+    }
+    .arco-table-tr:hover .arco-table-td {
+      background-color: #f2f3f5 !important;
+    }
+    .arco-table-cell {
+      border-right: 1px solid #e5e6eb;
+    }
+    .arco-table-th {
+      background-color: #f7f8fa !important;
+      font-weight: 600 !important;
+    }
     /* 快捷筛选栏 */
     .quick-filter-bar { background: #fff; border-radius: 8px; padding: 12px 20px; margin-bottom: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.04); }
     .quick-filter-bar .arco-radio-group { display: flex; gap: 4px; }
@@ -546,32 +561,28 @@ app.get('/*', (c) => {
     <div class="layout">
       <aside class="sidebar">
         <div class="sidebar-logo">
-          <icon-film /> DeepDrama
+          DeepDrama
         </div>
         <nav class="sidebar-menu">
           <div class="menu-item" :class="{ active: currentPage === 'dashboard' }" @click="currentPage = 'dashboard'">
-            <icon-dashboard />
             <div class="menu-text">
               <span class="menu-title">剧本概览</span>
               <span class="menu-subtitle">数据统计分析</span>
             </div>
           </div>
           <div class="menu-item" :class="{ active: currentPage === 'scripts' }" @click="currentPage = 'scripts'">
-            <icon-file />
             <div class="menu-text">
               <span class="menu-title">剧本管理</span>
               <span class="menu-subtitle">筛选与评分</span>
             </div>
           </div>
           <div class="menu-item" :class="{ active: currentPage === 'ratings' }" @click="currentPage = 'ratings'">
-            <icon-star />
             <div class="menu-text">
               <span class="menu-title">评分记录</span>
               <span class="menu-subtitle">历史评分查询</span>
             </div>
           </div>
           <div class="menu-item" :class="{ active: currentPage === 'rankings' }" @click="currentPage = 'rankings'">
-            <icon-trophy />
             <div class="menu-text">
               <span class="menu-title">剧本排行</span>
               <span class="menu-subtitle">TOP50榜单</span>
@@ -712,57 +723,103 @@ app.get('/*', (c) => {
               <div style="font-size: 16px; color: #4e5969; margin-bottom: 8px;">暂无剧本数据</div>
               <div style="font-size: 13px; color: #86909c;">{{ hasActiveFilters ? '尝试调整筛选条件' : '点击右上角按钮新建剧本' }}</div>
             </div>
-            <a-table v-else :data="scripts" :pagination="pagination" :loading="loading" @page-change="onPageChange" row-key="script_id" :bordered="false" :scroll="{x: 1300}" table-layout-fixed>
+            <a-table v-else :data="scripts" :pagination="pagination" :loading="loading" @page-change="onPageChange" row-key="script_id" :bordered="{ wrapper: true, cell: true }" :scroll="{x: 2000}" table-layout-fixed :stripe="true">
               <template #columns>
-                <a-table-column title="编号" data-index="script_id" :width="80" />
-                <a-table-column title="剧本名称" :width="180">
+                <!-- 首列冻结 -->
+                <a-table-column title="剧本编号" data-index="script_id" :width="100" fixed="left" />
+                <a-table-column title="剧本名称" :width="200" fixed="left">
                   <template #cell="{ record }">
-                    <div style="font-weight: 500;">{{ record.name }}</div>
+                    <a-tooltip :content="record.name">
+                      <div style="font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{ record.name }}</div>
+                    </a-tooltip>
                   </template>
                 </a-table-column>
-                <a-table-column title="编剧" data-index="writer" :width="80" />
-                <a-table-column title="内容团队" data-index="content_team" :width="90" />
-                <a-table-column title="制片" data-index="producer" :width="80" />
-                <a-table-column title="制片团队" data-index="producer_team" :width="90" />
-                <a-table-column title="评分" :width="70" align="center">
+                
+                <!-- 中间列 -->
+                <a-table-column title="综合评分" :width="90" align="center">
                   <template #cell="{ record }">
                     <span :class="'score-badge score-' + getScoreClass(record.avg_score)">{{ record.avg_score?.toFixed(1) || '-' }}</span>
                   </template>
                 </a-table-column>
-                <a-table-column title="状态" :width="100" align="center">
+                <a-table-column title="评分人数" data-index="rating_count" :width="90" align="center">
+                  <template #cell="{ record }">
+                    {{ record.rating_count || 0 }}
+                  </template>
+                </a-table-column>
+                <a-table-column title="剧本状态" :width="100" align="center">
                   <template #cell="{ record }">
                     <a-tag size="small" :color="getStatusColor(record.status)">{{ record.status }}</a-tag>
                   </template>
                 </a-table-column>
-                <a-table-column title="立项" :width="60" align="center">
+                <a-table-column title="立项状态" :width="90" align="center">
                   <template #cell="{ record }">
-                    <span v-if="record.is_project" style="color: #00b42a;">✅</span>
+                    <a-tag v-if="record.is_project" size="small" color="green">已立项</a-tag>
+                    <a-tag v-else size="small" color="gray">未立项</a-tag>
+                  </template>
+                </a-table-column>
+                <a-table-column title="项目归属" data-index="project_name" :width="100">
+                  <template #cell="{ record }">
+                    {{ record.project_name || '-' }}
+                  </template>
+                </a-table-column>
+                <a-table-column title="编剧" data-index="writer" :width="80">
+                  <template #cell="{ record }">
+                    {{ record.writer || '-' }}
+                  </template>
+                </a-table-column>
+                <a-table-column title="内容团队" data-index="content_team" :width="90">
+                  <template #cell="{ record }">
+                    {{ record.content_team || '-' }}
+                  </template>
+                </a-table-column>
+                <a-table-column title="制片" data-index="producer" :width="80">
+                  <template #cell="{ record }">
+                    {{ record.producer || '-' }}
+                  </template>
+                </a-table-column>
+                <a-table-column title="制片团队" data-index="producer_team" :width="90">
+                  <template #cell="{ record }">
+                    {{ record.producer_team || '-' }}
+                  </template>
+                </a-table-column>
+                <a-table-column title="类型" data-index="genre" :width="70" align="center">
+                  <template #cell="{ record }">
+                    {{ record.genre || '-' }}
+                  </template>
+                </a-table-column>
+                <a-table-column title="付费类型" data-index="content_type" :width="80" align="center">
+                  <template #cell="{ record }">
+                    {{ record.content_type || '-' }}
+                  </template>
+                </a-table-column>
+                <a-table-column title="提交日期" data-index="submit_date" :width="110" align="center">
+                  <template #cell="{ record }">
+                    {{ record.submit_date || '-' }}
+                  </template>
+                </a-table-column>
+                <a-table-column title="备注" :width="150">
+                  <template #cell="{ record }">
+                    <a-tooltip v-if="record.remarks" :content="record.remarks">
+                      <div style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #86909c;">
+                        {{ record.remarks }}
+                      </div>
+                    </a-tooltip>
                     <span v-else style="color: #c9cdd4;">-</span>
                   </template>
                 </a-table-column>
-                <a-table-column title="操作" :width="160" align="center" fixed="right">
+                
+                <!-- 末列冻结 -->
+                <a-table-column title="操作" :width="180" align="center" fixed="right">
                   <template #cell="{ record }">
-                    <a-space>
-                      <a-button type="text" size="small" @click="openFeishu(record)">
-                        <template #icon><icon-file /></template>看剧本
-                      </a-button>
-                      <a-button type="primary" size="mini" @click="openRatingDrawer(record)">
-                        <template #icon><icon-star /></template>去评分
-                      </a-button>
+                    <a-space size="small">
+                      <a-button type="text" size="small" @click="openFeishu(record)">看剧本</a-button>
+                      <a-button type="primary" size="mini" @click="openRatingDrawer(record)">去评分</a-button>
                       <a-dropdown trigger="hover">
-                        <a-button type="text" size="small">
-                          <template #icon><icon-more /></template>
-                        </a-button>
+                        <a-button type="text" size="small">更多</a-button>
                         <template #content>
-                          <a-doption @click="openEditModal(record)">
-                            <template #icon><icon-edit /></template>编辑剧本
-                          </a-doption>
-                          <a-doption @click="copyScriptInfo(record)">
-                            <template #icon><icon-copy /></template>复制信息
-                          </a-doption>
-                          <a-doption class="danger-option" @click="confirmDeleteScript(record.script_id)">
-                            <template #icon><icon-delete /></template>删除剧本
-                          </a-doption>
+                          <a-doption @click="openEditModal(record)">编辑剧本</a-doption>
+                          <a-doption @click="copyScriptInfo(record)">复制信息</a-doption>
+                          <a-doption class="danger-option" @click="confirmDeleteScript(record.script_id)">删除剧本</a-doption>
                         </template>
                       </a-dropdown>
                     </a-space>
@@ -790,34 +847,71 @@ app.get('/*', (c) => {
           </div>
           
           <div class="table-card">
-            <a-table :data="ratings" :pagination="ratingPagination" :loading="loading" @page-change="onRatingPageChange" row-key="id" :bordered="false" :scroll="{x: 1100}" table-layout-fixed>
+            <a-table :data="ratings" :pagination="ratingPagination" :loading="loading" @page-change="onRatingPageChange" row-key="id" :bordered="{ wrapper: true, cell: true }" :scroll="{x: 1400}" table-layout-fixed :stripe="true">
               <template #columns>
-                <a-table-column title="剧本" :width="180">
+                <!-- 首列冻结 -->
+                <a-table-column title="剧本编号" data-index="script_id" :width="100" fixed="left" />
+                <a-table-column title="剧本名称" :width="180" fixed="left">
                   <template #cell="{ record }">
                     <div style="font-weight: 500;">{{ record.script_name || record.script_id }}</div>
                   </template>
                 </a-table-column>
-                <a-table-column title="评分人" :width="120">
+                
+                <!-- 中间列 -->
+                <a-table-column title="评分人" data-index="user_name" :width="100" align="center">
                   <template #cell="{ record }">
                     {{ record.user_name }}
+                  </template>
+                </a-table-column>
+                <a-table-column title="角色" :width="90" align="center">
+                  <template #cell="{ record }">
                     <span :class="'role-tag ' + (record.role_type || record.user_role)">{{ record.role_type || record.user_role }}</span>
                   </template>
                 </a-table-column>
-                <a-table-column title="内容" data-index="content_score" :width="70" align="center" />
-                <a-table-column title="题材" data-index="market_score" :width="70" align="center" />
-                <a-table-column title="制作" data-index="commercial_score" :width="70" align="center" />
-                <a-table-column title="综合" :width="70" align="center">
+                <a-table-column title="内容评分" :width="90" align="center">
                   <template #cell="{ record }">
-                    <span style="font-weight: 600; color: #165dff;">{{ record.total_score?.toFixed(1) || '-' }}</span>
+                    <span :style="{ color: getScoreColor(record.content_score), fontWeight: 500 }">
+                      {{ record.content_score || '-' }}
+                    </span>
                   </template>
                 </a-table-column>
-                <a-table-column title="时间" data-index="rating_date" :width="100" />
-                <a-table-column title="评语">
+                <a-table-column title="题材评分" :width="90" align="center">
+                  <template #cell="{ record }">
+                    <span :style="{ color: getScoreColor(record.market_score), fontWeight: 500 }">
+                      {{ record.market_score || '-' }}
+                    </span>
+                  </template>
+                </a-table-column>
+                <a-table-column title="制作评分" :width="90" align="center">
+                  <template #cell="{ record }">
+                    <span :style="{ color: getScoreColor(record.commercial_score), fontWeight: 500 }">
+                      {{ record.commercial_score || '-' }}
+                    </span>
+                  </template>
+                </a-table-column>
+                <a-table-column title="综合评分" :width="100" align="center">
+                  <template #cell="{ record }">
+                    <span :class="'score-badge score-' + getScoreClass(record.total_score)">
+                      {{ record.total_score?.toFixed(1) || '-' }}
+                    </span>
+                  </template>
+                </a-table-column>
+                <a-table-column title="评分日期" data-index="rating_date" :width="110" align="center" />
+                <a-table-column title="评语备注" :width="200">
                   <template #cell="{ record }">
                     <a-tooltip v-if="record.comments" :content="record.comments">
-                      <span style="color: #86909c; cursor: pointer;">{{ record.comments?.slice(0, 20) }}{{ record.comments?.length > 20 ? '...' : '' }}</span>
+                      <div style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #4e5969;">
+                        {{ record.comments }}
+                      </div>
                     </a-tooltip>
                     <span v-else style="color: #c9cdd4;">-</span>
+                  </template>
+                </a-table-column>
+                
+                <!-- 末列冻结 -->
+                <a-table-column title="操作" :width="100" align="center" fixed="right">
+                  <template #cell="{ record }">
+                    <a-button type="text" size="small" @click="viewRatingDetail(record)">查看详情</a-button>
                   </template>
                 </a-table-column>
               </template>
@@ -1565,6 +1659,15 @@ app.get('/*', (c) => {
           });
         };
         
+        const viewRatingDetail = async (rating) => {
+          // 通过剧本ID获取完整剧本信息并打开评分抽屉
+          const res = await axios.get('/api/scripts/' + rating.script_id);
+          currentScript.value = res.data;
+          ratingDrawerVisible.value = true;
+          // 切换到剧本管理页面
+          currentPage.value = 'scripts';
+        };
+        
         watch(currentPage, async (page) => {
           if (page === 'dashboard') { await loadDashboard(); }
           else if (page === 'scripts') { await loadScripts(); }
@@ -1585,7 +1688,7 @@ app.get('/*', (c) => {
           getScoreClass, getScoreColor, getStatusColor, getScoreLevelText, loadDashboard, loadScripts, loadRatings,
           onPageChange, onRatingPageChange, openFeishu, openRatingDrawer, openRatingModal, submitRating, 
           openEditModal, submitEditScript, deleteScript, goToScriptDetail, resetScriptFilters, onQuickFilterChange,
-          confirmDeleteScript, copyScriptInfo, openCreateModal, submitCreateScript
+          confirmDeleteScript, copyScriptInfo, openCreateModal, submitCreateScript, viewRatingDetail
         };
       }
     });
