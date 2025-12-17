@@ -1592,7 +1592,7 @@ app.get('/*', (c) => {
         
         return {
           currentPage, loading, submitting, kpi, scripts, ratings, rankings, users, options,
-          scriptFilters, ratingFilters, ratingDateRange, pagination, ratingPagination,
+          scriptFilters, ratingFilters, ratingDateRange, scriptPagination, ratingPagination,
           ratingModalVisible, ratingTabKey, submitRatingVisible, editModalVisible, currentScript,
           expandedComments, remindedUsers, ratingForm, editForm, avgDimensionScores,
           getScoreClass, getScoreColor, getStatusColor, getOverdueDays, copyToClipboard, toggleComment,
