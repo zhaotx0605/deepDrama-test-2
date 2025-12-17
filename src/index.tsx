@@ -108,9 +108,9 @@ app.get('/api/dashboard/team-distribution', async (c) => {
 app.get('/api/scripts', async (c) => {
   const db = c.env.DB
   const { 
-    tab, status, source_type, team, genre, content_team, producer_team,
+    tab, status, statuses, source_type, team, genre, content_team, producer_team,
     is_project, min_score, max_score, keyword, start_date, end_date,
-    assign_status, unrated, page = '1', limit = '20', sort = 'avg_score', order = 'desc'
+    assign_status, unrated, page = '1', limit = '10', sort = 'avg_score', order = 'desc'
   } = c.req.query()
   
   let sql = 'SELECT * FROM scripts WHERE 1=1'
@@ -129,7 +129,19 @@ app.get('/api/scripts', async (c) => {
   
   // 其他筛选条件
   if (assign_status) { sql += ' AND assign_status = ?'; params.push(assign_status) }
+  
+  // 单个状态筛选
   if (status) { sql += ' AND status = ?'; params.push(status) }
+  
+  // 多选状态筛选 (逗号分隔)
+  if (statuses) {
+    const statusArr = statuses.split(',').filter(s => s.trim())
+    if (statusArr.length > 0) {
+      sql += ` AND status IN (${statusArr.map(() => '?').join(',')})`
+      params.push(...statusArr)
+    }
+  }
+  
   if (source_type) { sql += ' AND source_type = ?'; params.push(source_type) }
   if (team) { sql += ' AND team = ?'; params.push(team) }
   if (genre) { sql += ' AND genre = ?'; params.push(genre) }
@@ -296,7 +308,7 @@ app.delete('/api/scripts/:id', async (c) => {
 // 获取评分记录
 app.get('/api/ratings', async (c) => {
   const db = c.env.DB
-  const { script_id, user_id, start_date, end_date, min_score, max_score, page = '1', limit = '20' } = c.req.query()
+  const { script_id, user_id, start_date, end_date, min_score, max_score, page = '1', limit = '10' } = c.req.query()
   
   let sql = `
     SELECT r.*, s.name as script_name, s.status as script_status, s.avg_score as script_avg_score, u.role_type
@@ -492,6 +504,9 @@ app.get('/*', (c) => {
     .chart-card { background: #fff; border-radius: 8px; padding: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.04); }
     .chart-title { font-size: 16px; font-weight: 500; color: #1d2129; margin-bottom: 16px; }
     .filter-bar { background: #fff; border-radius: 8px; padding: 16px 20px; margin-bottom: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.04); }
+    .tab-bar { margin-bottom: 16px; }
+    .tab-bar .arco-radio-group-button { background: #fff; border-radius: 8px; padding: 4px; box-shadow: 0 2px 8px rgba(0,0,0,0.04); }
+    .tab-bar .arco-radio-button { border-radius: 6px !important; padding: 6px 16px; }
     .table-card { background: #fff; border-radius: 8px; padding: 0; box-shadow: 0 2px 8px rgba(0,0,0,0.04); overflow: hidden; }
     
     /* 剧本单元格样式 - 名称+编号上下排列 */
@@ -654,24 +669,56 @@ app.get('/*', (c) => {
             <a-button type="primary" @click="openCreateModal">新建剧本</a-button>
           </div>
           
+          <!-- Tab切换: 评分状态 -->
+          <div class="tab-bar">
+            <a-radio-group v-model="scriptFilters.tab" type="button" @change="onTabChange">
+              <a-radio value="all">全部</a-radio>
+              <a-radio value="pending_rating">待评分</a-radio>
+              <a-radio value="pending_claim">待认领</a-radio>
+              <a-radio value="project">已立项</a-radio>
+              <a-radio value="abandoned">已废弃</a-radio>
+            </a-radio-group>
+          </div>
+          
+          <!-- 搜索和筛选区域 -->
           <div class="filter-bar">
-            <a-space wrap>
-              <a-input-search v-model="scriptFilters.keyword" placeholder="搜索剧本名称/编号" allow-clear style="width: 220px;" @search="loadScripts" @press-enter="loadScripts" />
-              <a-select v-model="scriptFilters.status" placeholder="剧本状态" allow-clear style="width: 120px;" @change="loadScripts">
-                <a-option value="一卡初稿">一卡初稿</a-option>
-                <a-option value="改稿中">改稿中</a-option>
-                <a-option value="完整剧本">完整剧本</a-option>
-                <a-option value="终稿">终稿</a-option>
-              </a-select>
-              <a-select v-model="scriptFilters.content_team" placeholder="内容团队" allow-clear style="width: 120px;" @change="loadScripts">
-                <a-option v-for="t in options.contentTeams" :key="t" :value="t">{{ t }}</a-option>
-              </a-select>
-              <a-button @click="resetScriptFilters">重置</a-button>
-            </a-space>
+            <a-row :gutter="16" align="center">
+              <!-- 快捷搜索 -->
+              <a-col :flex="'300px'">
+                <a-input-search v-model="scriptFilters.keyword" placeholder="搜索剧本名称或编号" allow-clear @search="onSearchScript" @press-enter="onSearchScript">
+                  <template #prefix><icon-search /></template>
+                </a-input-search>
+              </a-col>
+              
+              <!-- 筛选项 -->
+              <a-col :flex="'auto'">
+                <a-space wrap>
+                  <a-select v-model="scriptFilters.statuses" placeholder="剧本状态" allow-clear multiple :max-tag-count="1" style="min-width: 150px;" @change="loadScripts">
+                    <a-option value="一卡初稿">一卡初稿</a-option>
+                    <a-option value="改稿中">改稿中</a-option>
+                    <a-option value="完整剧本">完整剧本</a-option>
+                    <a-option value="终稿">终稿</a-option>
+                    <a-option value="已废弃">已废弃</a-option>
+                  </a-select>
+                  <a-select v-model="scriptFilters.source_type" placeholder="投稿类型" allow-clear style="width: 130px;" @change="loadScripts">
+                    <a-option value="外部投稿">外部投稿</a-option>
+                    <a-option value="内部团队">内部团队</a-option>
+                    <a-option value="合作剧组">合作剧组</a-option>
+                    <a-option value="版权购买">版权购买</a-option>
+                  </a-select>
+                  <a-select v-model="scriptFilters.genre" placeholder="剧本分类" allow-clear style="width: 110px;" @change="loadScripts">
+                    <a-option value="男频">男频</a-option>
+                    <a-option value="女频">女频</a-option>
+                    <a-option value="皆可">皆可</a-option>
+                  </a-select>
+                  <a-button @click="resetScriptFilters">重置筛选</a-button>
+                </a-space>
+              </a-col>
+            </a-row>
           </div>
           
           <div class="table-card">
-            <a-table :data="scripts" :pagination="pagination" :loading="loading" @page-change="onPageChange" row-key="script_id" :bordered="{ cell: true }" :stripe="true" :scroll="{x: 1600}">
+            <a-table :data="scripts" :pagination="scriptPagination" :loading="loading" @page-change="onPageChange" @page-size-change="onPageSizeChange" row-key="script_id" :bordered="{ cell: true }" :stripe="true" :scroll="{x: 1600}">
               <template #columns>
                 <!-- 剧本信息：名称+编号合并 -->
                 <a-table-column title="剧本" :width="220" fixed="left">
@@ -755,7 +802,7 @@ app.get('/*', (c) => {
           </div>
           
           <div class="table-card">
-            <a-table :data="ratings" :pagination="ratingPagination" :loading="loading" @page-change="onRatingPageChange" row-key="id" :bordered="{ cell: true }" :stripe="true" :scroll="{x: 1200}">
+            <a-table :data="ratings" :pagination="ratingPagination" :loading="loading" @page-change="onRatingPageChange" @page-size-change="onRatingPageSizeChange" row-key="id" :bordered="{ cell: true }" :stripe="true" :scroll="{x: 1200}">
               <template #columns>
                 <!-- 剧本信息：名称+编号合并 -->
                 <a-table-column title="剧本" :width="200" fixed="left">
@@ -1176,10 +1223,12 @@ app.get('/*', (c) => {
             </a-form-item>
           </a-col>
           <a-col :span="8">
-            <a-form-item label="来源">
+            <a-form-item label="投稿类型">
               <a-select v-model="editForm.source_type">
-                <a-option value="内部团队">内部团队</a-option>
                 <a-option value="外部投稿">外部投稿</a-option>
+                <a-option value="内部团队">内部团队</a-option>
+                <a-option value="合作剧组">合作剧组</a-option>
+                <a-option value="版权购买">版权购买</a-option>
               </a-select>
             </a-form-item>
           </a-col>
@@ -1238,13 +1287,36 @@ app.get('/*', (c) => {
         const options = ref({ contentTeams: [], writers: [], producers: [] });
         
         // 筛选
-        const scriptFilters = reactive({ keyword: '', status: '', content_team: '' });
+        const scriptFilters = reactive({ 
+          tab: 'all',           // Tab切换: all/pending_rating/pending_claim/project/abandoned
+          keyword: '',          // 快捷搜索
+          statuses: [],         // 剧本状态(多选)
+          source_type: '',      // 投稿类型
+          genre: '',            // 剧本分类
+          content_team: ''      // 内容团队
+        });
         const ratingFilters = reactive({ user_id: '' });
         const ratingDateRange = ref([]);
         
-        // 分页
-        const pagination = reactive({ current: 1, pageSize: 20, total: 0, showTotal: true });
-        const ratingPagination = reactive({ current: 1, pageSize: 20, total: 0, showTotal: true });
+        // 分页 - 默认10条/页，支持切换和跳转
+        const scriptPagination = reactive({ 
+          current: 1, 
+          pageSize: 10, 
+          total: 0, 
+          showTotal: true,
+          showPageSize: true,
+          pageSizeOptions: [10, 20, 50, 100],
+          showJumper: true
+        });
+        const ratingPagination = reactive({ 
+          current: 1, 
+          pageSize: 10, 
+          total: 0, 
+          showTotal: true,
+          showPageSize: true,
+          pageSizeOptions: [10, 20, 50, 100],
+          showJumper: true
+        });
         
         // 弹框
         const ratingModalVisible = ref(false);
@@ -1324,13 +1396,34 @@ app.get('/*', (c) => {
         
         const loadScripts = async () => {
           loading.value = true;
-          const params = new URLSearchParams({ page: pagination.current, limit: pagination.pageSize });
+          const params = new URLSearchParams({ page: scriptPagination.current, limit: scriptPagination.pageSize });
+          
+          // Tab筛选
+          if (scriptFilters.tab === 'pending_rating') params.set('unrated', 'true');
+          else if (scriptFilters.tab === 'pending_claim') params.set('assign_status', '待分配');
+          else if (scriptFilters.tab === 'project') params.set('is_project', 'true');
+          else if (scriptFilters.tab === 'abandoned') params.set('status', '已废弃');
+          
+          // 关键词搜索
           if (scriptFilters.keyword) params.set('keyword', scriptFilters.keyword);
-          if (scriptFilters.status) params.set('status', scriptFilters.status);
+          
+          // 剧本状态(多选) - 传逗号分隔
+          if (scriptFilters.statuses?.length && scriptFilters.tab !== 'abandoned') {
+            params.set('statuses', scriptFilters.statuses.join(','));
+          }
+          
+          // 投稿类型
+          if (scriptFilters.source_type) params.set('source_type', scriptFilters.source_type);
+          
+          // 剧本分类
+          if (scriptFilters.genre) params.set('genre', scriptFilters.genre);
+          
+          // 内容团队
           if (scriptFilters.content_team) params.set('content_team', scriptFilters.content_team);
+          
           const res = await axios.get('/api/scripts?' + params);
           scripts.value = res.data.data;
-          pagination.total = res.data.total;
+          scriptPagination.total = res.data.total;
           loading.value = false;
         };
         
@@ -1357,9 +1450,26 @@ app.get('/*', (c) => {
           users.value = userRes.data;
         };
         
-        const resetScriptFilters = () => { Object.assign(scriptFilters, { keyword: '', status: '', content_team: '' }); loadScripts(); };
-        const onPageChange = (p) => { pagination.current = p; loadScripts(); };
+        const resetScriptFilters = () => { 
+          Object.assign(scriptFilters, { tab: scriptFilters.tab, keyword: '', statuses: [], source_type: '', genre: '', content_team: '' }); 
+          scriptPagination.current = 1;
+          loadScripts(); 
+        };
+        
+        const onTabChange = () => {
+          scriptPagination.current = 1;
+          loadScripts();
+        };
+        
+        const onSearchScript = () => {
+          scriptPagination.current = 1;
+          loadScripts();
+        };
+        
+        const onPageChange = (p) => { scriptPagination.current = p; loadScripts(); };
+        const onPageSizeChange = (size) => { scriptPagination.pageSize = size; scriptPagination.current = 1; loadScripts(); };
         const onRatingPageChange = (p) => { ratingPagination.current = p; loadRatings(); };
+        const onRatingPageSizeChange = (size) => { ratingPagination.pageSize = size; ratingPagination.current = 1; loadRatings(); };
         
         const openFeishu = (s) => window.open(s.feishu_url || 'https://bytedance.larkoffice.com', '_blank');
         
@@ -1486,7 +1596,7 @@ app.get('/*', (c) => {
           ratingModalVisible, ratingTabKey, submitRatingVisible, editModalVisible, currentScript,
           expandedComments, remindedUsers, ratingForm, editForm, avgDimensionScores,
           getScoreClass, getScoreColor, getStatusColor, getOverdueDays, copyToClipboard, toggleComment,
-          loadScripts, loadRatings, resetScriptFilters, onPageChange, onRatingPageChange,
+          loadScripts, loadRatings, resetScriptFilters, onTabChange, onSearchScript, onPageChange, onPageSizeChange, onRatingPageChange, onRatingPageSizeChange, scriptPagination,
           openFeishu, openRatingModal, openSubmitRating, submitRating, submitRatingDirect, sendReminder, sendReminderToAll, hasPendingRaters,
           openCreateModal, openEditModal, submitScript, confirmDeleteScript
         };
