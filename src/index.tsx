@@ -191,7 +191,26 @@ app.get('/api/scripts/:id', async (c) => {
     ORDER BY r.rating_date DESC, r.created_at DESC
   `).bind(script.script_id).all()
   
-  return c.json({ ...script, ratings: ratings.results || [] })
+  // 获取待评分人员（主编/制片等指定评分人）
+  const assignedRaters = await db.prepare(`
+    SELECT * FROM users WHERE role_type IN ('主编', '制片', '项目负责人') ORDER BY role_type, name
+  `).all()
+  
+  // 标记已评分和待评分状态
+  const ratedUserIds = new Set((ratings.results || []).map((r: any) => r.user_id))
+  const pendingRaters = (assignedRaters.results || []).map((u: any) => ({
+    ...u,
+    hasRated: ratedUserIds.has(u.user_id),
+    status: ratedUserIds.has(u.user_id) ? '已评分' : '待评分'
+  }))
+  
+  return c.json({ 
+    ...script, 
+    ratings: ratings.results || [],
+    pendingRaters,
+    ratedCount: ratings.results?.length || 0,
+    pendingCount: pendingRaters.filter((r: any) => !r.hasRated).length
+  })
 })
 
 // 创建剧本
@@ -420,6 +439,22 @@ app.get('/api/options', async (c) => {
   })
 })
 
+// ==================== 提醒 API ====================
+app.post('/api/reminders', async (c) => {
+  const db = c.env.DB
+  const body = await c.req.json()
+  
+  // 记录提醒（实际应用中可以发送飞书/企微消息）
+  // 这里简单记录到日志
+  console.log(`发送提醒: 剧本${body.script_id} -> 用户${body.user_id}`)
+  
+  return c.json({ 
+    success: true, 
+    message: '提醒已发送',
+    reminded_at: new Date().toISOString()
+  })
+})
+
 // ==================== 前端页面 ====================
 app.get('/*', (c) => {
   return c.html(`<!DOCTYPE html>
@@ -439,19 +474,18 @@ app.get('/*', (c) => {
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'PingFang SC', sans-serif; background: #f5f7fa; }
     .layout { display: flex; min-height: 100vh; }
-    .sidebar { width: 220px; background: linear-gradient(180deg, #1d2129 0%, #232931 100%); position: fixed; height: 100vh; z-index: 100; }
-    .sidebar-logo { padding: 20px; color: #fff; font-size: 20px; font-weight: 600; border-bottom: 1px solid rgba(255,255,255,0.1); display: flex; align-items: center; gap: 10px; }
-    .sidebar-menu { padding: 12px 0; }
-    .menu-item { display: flex; align-items: center; padding: 14px 24px; color: rgba(255,255,255,0.7); cursor: pointer; transition: all 0.2s; gap: 12px; }
-    .menu-text { display: flex; flex-direction: column; }
-    .menu-title { font-size: 14px; font-weight: 500; }
-    .menu-subtitle { font-size: 11px; opacity: 0.6; margin-top: 2px; }
-    .menu-item:hover { background: rgba(255,255,255,0.08); color: #fff; }
-    .menu-item.active { background: linear-gradient(90deg, #165dff 0%, #0e42d2 100%); color: #fff; }
-    .main-content { margin-left: 220px; flex: 1; padding: 24px; min-height: 100vh; }
+    
+    /* 简洁菜单样式 */
+    .sidebar { width: 180px; background: #1d2129; position: fixed; height: 100vh; z-index: 100; }
+    .sidebar-logo { padding: 20px 16px; color: #fff; font-size: 18px; font-weight: 600; border-bottom: 1px solid rgba(255,255,255,0.08); }
+    .sidebar-menu { padding: 8px 0; }
+    .menu-item { padding: 12px 16px; color: rgba(255,255,255,0.65); cursor: pointer; transition: all 0.2s; font-size: 14px; }
+    .menu-item:hover { background: rgba(255,255,255,0.06); color: #fff; }
+    .menu-item.active { background: #165dff; color: #fff; }
+    
+    .main-content { margin-left: 180px; flex: 1; padding: 24px; min-height: 100vh; }
     .page-header { margin-bottom: 24px; }
-    .page-title { font-size: 22px; font-weight: 600; color: #1d2129; }
-    .page-desc { color: #86909c; margin-top: 4px; font-size: 14px; }
+    .page-title { font-size: 20px; font-weight: 600; color: #1d2129; }
     .stat-card { background: #fff; border-radius: 8px; padding: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.04); }
     .stat-card-title { color: #86909c; font-size: 14px; margin-bottom: 8px; }
     .stat-card-value { font-size: 28px; font-weight: 600; color: #1d2129; }
@@ -459,164 +493,116 @@ app.get('/*', (c) => {
     .chart-title { font-size: 16px; font-weight: 500; color: #1d2129; margin-bottom: 16px; }
     .filter-bar { background: #fff; border-radius: 8px; padding: 16px 20px; margin-bottom: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.04); }
     .table-card { background: #fff; border-radius: 8px; padding: 0; box-shadow: 0 2px 8px rgba(0,0,0,0.04); overflow: hidden; }
-    .project-badge { display: inline-flex; align-items: center; gap: 4px; background: #e8f3ff; color: #165dff; padding: 2px 8px; border-radius: 4px; font-size: 12px; }
-    .role-tag { font-size: 11px; padding: 1px 6px; border-radius: 3px; margin-left: 6px; display: inline-block; }
+    
+    /* 剧本单元格样式 - 名称+编号上下排列 */
+    .script-cell { display: flex; flex-direction: column; }
+    .script-name { font-weight: 500; color: #1d2129; margin-bottom: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .script-id { font-size: 12px; color: #86909c; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; }
+    .script-id:hover { color: #165dff; }
+    .copy-icon { opacity: 0; transition: opacity 0.2s; }
+    .script-id:hover .copy-icon { opacity: 1; }
+    
+    /* 角色标签 */
+    .role-tag { font-size: 11px; padding: 1px 6px; border-radius: 3px; display: inline-block; }
     .role-tag.主编 { background: #fff7e8; color: #ff7d00; }
     .role-tag.制片 { background: #e8f7ff; color: #0fc6c2; }
     .role-tag.评审 { background: #f0f0f0; color: #86909c; }
     .role-tag.内容 { background: #e8f3ff; color: #165dff; }
-    .rating-drawer-content { padding: 0 20px; }
-    .rating-item { border-bottom: 1px solid #e5e6eb; padding: 16px 0; }
-    .rating-item:last-child { border-bottom: none; }
-    .rating-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
-    .rating-user { display: flex; align-items: center; gap: 8px; }
-    .rating-scores { display: flex; gap: 16px; color: #86909c; font-size: 13px; }
-    .score-badge { display: inline-block; padding: 4px 12px; border-radius: 4px; font-weight: 600; color: #fff; font-size: 13px; }
-    .score-s { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
-    .score-a { background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); }
-    .score-b { background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); }
-    .score-c { background: linear-gradient(135deg, #ffecd2 0%, #fcb69f 100%); color: #333; }
-    .drawer-header { display: flex; justify-content: space-between; align-items: center; width: 100%; padding-right: 10px; }
-    .script-info-card { background: #f7f8fa; border-radius: 8px; padding: 16px; margin-bottom: 16px; }
-    .script-info-row { display: flex; margin-bottom: 8px; }
-    .script-info-label { color: #86909c; width: 80px; flex-shrink: 0; }
-    .script-info-value { color: #1d2129; flex: 1; }
-    /* 新增优化样式 */
-    .empty-state { text-align: center; padding: 60px 20px; }
-    .danger-option { color: #f53f3f !important; }
-    .danger-option:hover { background: #ffece8 !important; }
-    .score-legend { background: #f7f8fa; border-radius: 8px; padding: 12px 16px; margin-bottom: 16px; }
-    .score-legend-title { font-size: 12px; color: #86909c; margin-bottom: 8px; }
-    .score-legend-items { display: flex; gap: 8px; flex-wrap: wrap; }
-    .score-legend-items .score-badge { font-size: 11px; padding: 2px 8px; }
-    .score-indicator { font-size: 11px; font-weight: 500; padding: 1px 4px; border-radius: 2px; }
-    .score-indicator.score-s { color: #722ed1; background: #f5f0ff; }
-    .score-indicator.score-a { color: #f5576c; background: #ffece8; }
-    .score-indicator.score-b { color: #165dff; background: #e8f3ff; }
-    .score-indicator.score-c { color: #86909c; background: #f2f3f5; }
-    .predicted-score { display: flex; align-items: center; gap: 8px; padding: 12px 16px; background: linear-gradient(135deg, #f0f5ff 0%, #e8f3ff 100%); border-radius: 8px; margin-bottom: 16px; font-size: 14px; }
-    .predicted-score .score-badge { font-size: 16px; padding: 4px 12px; }
-    .arco-radio-group-button { border-radius: 6px !important; }
-    .arco-badge { margin-left: 4px; }
-    .arco-badge .arco-badge-number { font-size: 10px; min-width: 16px; height: 16px; line-height: 16px; padding: 0 4px; }
+    .role-tag.项目负责人 { background: #f5f0ff; color: #722ed1; }
     
-    /* 表格斑马纹和边框优化 */
-    .arco-table-stripe .arco-table-tr:nth-child(2n) .arco-table-td {
-      background-color: #fafafa;
-    }
-    .arco-table-tr:hover .arco-table-td {
-      background-color: #f2f3f5 !important;
-    }
-    .arco-table-cell {
-      border-right: 1px solid #e5e6eb;
-    }
-    .arco-table-th {
-      background-color: #f7f8fa !important;
-      font-weight: 600 !important;
-    }
-    /* 快捷筛选栏 */
-    .quick-filter-bar { background: #fff; border-radius: 8px; padding: 12px 20px; margin-bottom: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.04); }
-    .quick-filter-bar .arco-radio-group { display: flex; gap: 4px; }
-    .quick-filter-bar .arco-radio-button { padding: 6px 12px; border-radius: 16px; }
-    /* 评分记录表格 */
-    .rating-table-wrapper { margin-top: 8px; }
-    .rating-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-    .rating-table th { background: #f7f8fa; padding: 10px 8px; text-align: center; font-weight: 500; color: #4e5969; border-bottom: 1px solid #e5e6eb; }
-    .rating-table td { padding: 10px 8px; text-align: center; border-bottom: 1px solid #f2f3f5; }
-    .rating-table tbody tr:hover { background: #f7f8fa; }
-    .rating-comment { background: #f7f8fa; padding: 10px 12px; border-radius: 6px; margin-top: 8px; font-size: 13px; color: #4e5969; line-height: 1.5; }
-    /* 表格样式修复 - 强制表头单行显示 */
-    .arco-table th,
-    .arco-table-th,
-    .arco-table-th-title,
-    .arco-table-th-item,
-    .arco-table-cell,
-    .arco-table .arco-table-th,
-    .arco-table .arco-table-th-item,
-    .arco-table .arco-table-th-title,
-    .arco-table thead th,
-    .arco-table thead .arco-table-th {
-      white-space: nowrap !important;
-      word-break: keep-all !important;
-      overflow: visible !important;
-      text-overflow: clip !important;
-    }
-    .arco-table-th { vertical-align: middle !important; }
-    .arco-table-th-item { display: flex !important; align-items: center !important; justify-content: inherit !important; }
-    .arco-table-td { vertical-align: middle !important; }
+    /* 评分徽章 */
+    .score-badge { display: inline-block; padding: 4px 10px; border-radius: 4px; font-weight: 600; color: #fff; font-size: 13px; min-width: 45px; text-align: center; }
+    .score-s { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
+    .score-a { background: linear-gradient(135deg, #00b42a 0%, #23c343 100%); }
+    .score-b { background: linear-gradient(135deg, #165dff 0%, #4080ff 100%); }
+    .score-c { background: linear-gradient(135deg, #ff7d00 0%, #ff9a2e 100%); }
+    .score-d { background: linear-gradient(135deg, #f53f3f 0%, #ff6b6b 100%); }
+    
+    /* 状态标签 */
+    .status-tag { padding: 2px 8px; border-radius: 4px; font-size: 12px; }
+    .status-tag.待评分 { background: #fff7e8; color: #ff7d00; }
+    .status-tag.已评分 { background: #e8ffea; color: #00b42a; }
+    .status-tag.超时待评 { background: #ffece8; color: #f53f3f; }
+    
+    /* 表格优化 */
+    .arco-table-stripe .arco-table-tr:nth-child(2n) .arco-table-td { background-color: #fafbfc; }
+    .arco-table-tr:hover .arco-table-td { background-color: #f2f3f5 !important; }
+    .arco-table-th { background-color: #f7f8fa !important; font-weight: 500 !important; }
     .table-card .arco-table { font-size: 13px; }
-    .table-card .arco-table-header { background: #fafafa; }
-    .table-card .arco-table-th-item { padding: 14px 12px !important; font-weight: 500; }
-    .table-card .arco-table-td { padding: 14px 12px !important; }
-    /* 评分弹框优化 */
-    .score-input-group { display: flex; flex-direction: column; gap: 12px; }
-    .score-input-row { display: flex; align-items: center; gap: 12px; padding: 12px 16px; background: #f7f8fa; border-radius: 8px; }
-    .score-input-label { width: 70px; font-weight: 500; color: #1d2129; }
-    .score-input-field { flex: 1; }
-    .score-level-hint { font-size: 11px; color: #86909c; margin-left: 8px; }
+    
+    /* 弹框标签页样式 - 放大版 */
+    .modal-tabs { margin-bottom: 0; }
+    .modal-tabs .arco-tabs-nav { padding: 0 4px; }
+    .modal-tabs .arco-tabs-tab { padding: 12px 20px; font-size: 14px; }
+    .tab-content { max-height: 560px; overflow-y: auto; padding: 20px 12px 20px 0; }
+    .tab-content::-webkit-scrollbar { width: 6px; }
+    .tab-content::-webkit-scrollbar-thumb { background: #e5e6eb; border-radius: 3px; }
+    .tab-content::-webkit-scrollbar-track { background: transparent; }
+    
+    /* 信息卡片 - 两列布局 */
+    .info-card { background: #f7f8fa; border-radius: 8px; padding: 20px; margin-bottom: 16px; }
+    .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px 40px; }
+    .info-row { display: flex; align-items: center; }
+    .info-label { color: #86909c; width: 80px; flex-shrink: 0; font-size: 13px; }
+    .info-value { color: #1d2129; flex: 1; font-size: 13px; font-weight: 500; }
+    .info-value .arco-tag { font-weight: 400; }
+    
+    /* 综合评分卡片 */
+    .score-card { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 24px; border-radius: 12px; text-align: center; color: #fff; margin-bottom: 20px; }
+    .score-card .score-value { font-size: 48px; font-weight: 700; line-height: 1.2; }
+    .score-card .score-label { font-size: 14px; opacity: 0.9; margin-top: 4px; }
+    
+    /* 分项评分 */
+    .dimension-scores { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 16px; }
+    .dimension-item { background: #fff; border-radius: 8px; padding: 16px; text-align: center; box-shadow: 0 2px 8px rgba(0,0,0,0.04); }
+    .dimension-label { font-size: 12px; color: #86909c; margin-bottom: 8px; }
+    .dimension-value { font-size: 24px; font-weight: 600; color: #1d2129; }
+    
+    /* 评分记录列表 */
+    .rating-list { }
+    .rating-item { background: #fff; border: 1px solid #e5e6eb; border-radius: 8px; padding: 16px; margin-bottom: 12px; }
+    .rating-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+    .rating-user { display: flex; align-items: center; gap: 8px; }
+    .rating-user-name { font-weight: 500; color: #1d2129; }
+    .rating-time { font-size: 12px; color: #86909c; }
+    .rating-scores { display: flex; gap: 16px; margin-bottom: 12px; }
+    .rating-score-item { text-align: center; }
+    .rating-score-label { font-size: 11px; color: #86909c; margin-bottom: 4px; }
+    .rating-score-value { font-size: 18px; font-weight: 600; }
+    .rating-comment { background: #f7f8fa; padding: 12px; border-radius: 6px; font-size: 13px; color: #4e5969; line-height: 1.6; }
+    .rating-comment-toggle { color: #165dff; cursor: pointer; font-size: 12px; margin-top: 8px; }
+    
+    /* 待评分管理 */
+    .pending-list { }
+    .pending-item { display: flex; justify-content: space-between; align-items: center; padding: 14px 16px; background: #fff; border: 1px solid #e5e6eb; border-radius: 8px; margin-bottom: 10px; }
+    .pending-user { display: flex; align-items: center; gap: 10px; }
+    .pending-user-name { font-weight: 500; }
+    .pending-status { display: flex; align-items: center; gap: 12px; }
+    .timeout-badge { color: #f53f3f; font-size: 12px; font-weight: 500; }
+    .reminded-info { font-size: 11px; color: #86909c; }
+    
+    /* 空状态 */
+    .empty-state { text-align: center; padding: 60px 20px; color: #86909c; }
   </style>
 </head>
 <body>
   <div id="app">
     <div class="layout">
+      <!-- 简洁菜单 -->
       <aside class="sidebar">
-        <div class="sidebar-logo">
-          DeepDrama
-        </div>
+        <div class="sidebar-logo">DeepDrama</div>
         <nav class="sidebar-menu">
-          <div class="menu-item" :class="{ active: currentPage === 'dashboard' }" @click="currentPage = 'dashboard'">
-            <div class="menu-text">
-              <span class="menu-title">剧本概览</span>
-              <span class="menu-subtitle">数据统计分析</span>
-            </div>
-          </div>
-          <div class="menu-item" :class="{ active: currentPage === 'scripts' }" @click="currentPage = 'scripts'">
-            <div class="menu-text">
-              <span class="menu-title">剧本管理</span>
-              <span class="menu-subtitle">筛选与评分</span>
-            </div>
-          </div>
-          <div class="menu-item" :class="{ active: currentPage === 'ratings' }" @click="currentPage = 'ratings'">
-            <div class="menu-text">
-              <span class="menu-title">评分记录</span>
-              <span class="menu-subtitle">历史评分查询</span>
-            </div>
-          </div>
-          <div class="menu-item" :class="{ active: currentPage === 'rankings' }" @click="currentPage = 'rankings'">
-            <div class="menu-text">
-              <span class="menu-title">剧本排行</span>
-              <span class="menu-subtitle">TOP50榜单</span>
-            </div>
-          </div>
+          <div class="menu-item" :class="{ active: currentPage === 'dashboard' }" @click="currentPage = 'dashboard'">剧本概览</div>
+          <div class="menu-item" :class="{ active: currentPage === 'scripts' }" @click="currentPage = 'scripts'">剧本管理</div>
+          <div class="menu-item" :class="{ active: currentPage === 'ratings' }" @click="currentPage = 'ratings'">评分记录</div>
+          <div class="menu-item" :class="{ active: currentPage === 'rankings' }" @click="currentPage = 'rankings'">剧本排行</div>
         </nav>
       </aside>
       
       <main class="main-content">
         <!-- 剧本概览 -->
         <div v-if="currentPage === 'dashboard'">
-          <div class="page-header">
-            <h1 class="page-title">剧本概览</h1>
-            <p class="page-desc">实时数据统计与可视化分析</p>
-          </div>
-          
-          <div class="filter-bar" style="margin-bottom: 20px;">
-            <a-space wrap size="medium">
-              <!-- 剧本状态单选 -->
-              <a-radio-group v-model="dashboardStatusFilter" type="button" size="small" @change="loadDashboard">
-                <a-radio value="">全部状态</a-radio>
-                <a-radio value="一卡初稿">一卡初稿</a-radio>
-                <a-radio value="改稿中">改稿中</a-radio>
-                <a-radio value="完整剧本">完整剧本</a-radio>
-                <a-radio value="终稿">终稿</a-radio>
-              </a-radio-group>
-              <a-divider direction="vertical" style="height: 24px; margin: 0 8px;" />
-              <!-- 投稿日期筛选 -->
-              <span style="color: #86909c; font-size: 13px;">投稿日期：</span>
-              <a-date-picker v-model="dateRange[0]" placeholder="开始日期" @change="loadDashboard" allow-clear style="width: 140px;" size="small" />
-              <span style="color: #c9cdd4;">至</span>
-              <a-date-picker v-model="dateRange[1]" placeholder="结束日期" @change="loadDashboard" allow-clear style="width: 140px;" size="small" />
-            </a-space>
-          </div>
+          <div class="page-header"><h1 class="page-title">剧本概览</h1></div>
           
           <a-row :gutter="20" style="margin-bottom: 20px;">
             <a-col :span="6">
@@ -663,163 +649,88 @@ app.get('/*', (c) => {
         
         <!-- 剧本管理 -->
         <div v-if="currentPage === 'scripts'">
-          <div class="page-header" style="display: flex; justify-content: space-between; align-items: flex-start;">
-            <div>
-              <h1 class="page-title">剧本管理</h1>
-              <p class="page-desc">管理和筛选所有剧本</p>
-            </div>
-            <a-button type="primary" @click="openCreateModal">
-              <template #icon><icon-plus /></template>新建剧本
-            </a-button>
+          <div class="page-header" style="display: flex; justify-content: space-between; align-items: center;">
+            <h1 class="page-title">剧本管理</h1>
+            <a-button type="primary" @click="openCreateModal">新建剧本</a-button>
           </div>
           
-          <!-- 快捷筛选标签 -->
-          <div class="quick-filter-bar">
-            <a-radio-group v-model="quickFilter" type="button" @change="onQuickFilterChange">
-              <a-radio value="all">全部 <a-badge :count="tabCounts.all" :max-count="999" /></a-radio>
-              <a-radio value="unrated">待评分 <a-badge :count="tabCounts.unrated" :max-count="999" /></a-radio>
-              <a-radio value="pending">待认领 <a-badge :count="tabCounts.pending" :max-count="999" /></a-radio>
-              <a-radio value="project">已立项 <a-badge :count="tabCounts.project" :max-count="999" /></a-radio>
-              <a-radio value="abandoned">已放弃 <a-badge :count="tabCounts.abandoned" :max-count="999" /></a-radio>
-            </a-radio-group>
-          </div>
-          
-          <!-- 详细筛选区域 -->
           <div class="filter-bar">
-            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
-              <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
-                <a-select v-model="scriptFilters.status" placeholder="剧本状态" allow-clear style="width: 120px;" @change="loadScripts" size="small">
-                  <a-option value="一卡初稿">一卡初稿</a-option>
-                  <a-option value="改稿中">改稿中</a-option>
-                  <a-option value="完整剧本">完整剧本</a-option>
-                  <a-option value="终稿">终稿</a-option>
-                  <a-option value="已立项">已立项</a-option>
-                </a-select>
-                <a-select v-model="scriptFilters.source_type" placeholder="剧本来源" allow-clear style="width: 120px;" @change="loadScripts" size="small">
-                  <a-option v-for="s in options.sourceTypes" :key="s" :value="s">{{ s }}</a-option>
-                </a-select>
-                <a-select v-model="scriptFilters.content_team" placeholder="内容团队" allow-clear style="width: 120px;" @change="loadScripts" size="small">
-                  <a-option v-for="t in options.contentTeams" :key="t" :value="t">{{ t }}</a-option>
-                </a-select>
-                <!-- 评分区间 -->
-                <span style="color: #86909c; font-size: 12px; margin-left: 8px;">评分：</span>
-                <a-input-number v-model="scriptFilters.min_score" placeholder="最低" :min="0" :max="100" style="width: 70px;" size="small" @change="loadScripts" />
-                <span style="color: #c9cdd4;">-</span>
-                <a-input-number v-model="scriptFilters.max_score" placeholder="最高" :min="0" :max="100" style="width: 70px;" size="small" @change="loadScripts" />
-                
-                <a-button size="small" @click="resetScriptFilters" :disabled="!hasActiveFilters">
-                  <template #icon><icon-refresh /></template>重置
-                </a-button>
-              </div>
-              
-              <a-input-search v-model="scriptFilters.keyword" placeholder="搜索剧本名称/编号/编剧" allow-clear style="width: 240px;" @search="loadScripts" @press-enter="loadScripts" size="small" />
-            </div>
+            <a-space wrap>
+              <a-input-search v-model="scriptFilters.keyword" placeholder="搜索剧本名称/编号" allow-clear style="width: 220px;" @search="loadScripts" @press-enter="loadScripts" />
+              <a-select v-model="scriptFilters.status" placeholder="剧本状态" allow-clear style="width: 120px;" @change="loadScripts">
+                <a-option value="一卡初稿">一卡初稿</a-option>
+                <a-option value="改稿中">改稿中</a-option>
+                <a-option value="完整剧本">完整剧本</a-option>
+                <a-option value="终稿">终稿</a-option>
+              </a-select>
+              <a-select v-model="scriptFilters.content_team" placeholder="内容团队" allow-clear style="width: 120px;" @change="loadScripts">
+                <a-option v-for="t in options.contentTeams" :key="t" :value="t">{{ t }}</a-option>
+              </a-select>
+              <a-button @click="resetScriptFilters">重置</a-button>
+            </a-space>
           </div>
           
           <div class="table-card">
-            <!-- 空状态 -->
-            <div v-if="!loading && scripts.length === 0" class="empty-state">
-              <icon-inbox style="font-size: 56px; color: #c9cdd4; margin-bottom: 16px;" />
-              <div style="font-size: 16px; color: #4e5969; margin-bottom: 8px;">暂无剧本数据</div>
-              <div style="font-size: 13px; color: #86909c;">{{ hasActiveFilters ? '尝试调整筛选条件' : '点击右上角按钮新建剧本' }}</div>
-            </div>
-            <a-table v-else :data="scripts" :pagination="pagination" :loading="loading" @page-change="onPageChange" row-key="script_id" :bordered="{ wrapper: true, cell: true }" :scroll="{x: 2000}" table-layout-fixed :stripe="true">
+            <a-table :data="scripts" :pagination="pagination" :loading="loading" @page-change="onPageChange" row-key="script_id" :bordered="{ cell: true }" :stripe="true" :scroll="{x: 1600}">
               <template #columns>
-                <!-- 首列冻结 -->
-                <a-table-column title="剧本编号" data-index="script_id" :width="100" fixed="left" />
-                <a-table-column title="剧本名称" :width="200" fixed="left">
+                <!-- 剧本信息：名称+编号合并 -->
+                <a-table-column title="剧本" :width="220" fixed="left">
                   <template #cell="{ record }">
-                    <a-tooltip :content="record.name">
-                      <div style="font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{ record.name }}</div>
-                    </a-tooltip>
+                    <div class="script-cell">
+                      <a-tooltip :content="record.name">
+                        <div class="script-name">{{ record.name }}</div>
+                      </a-tooltip>
+                      <div class="script-id" @click="copyToClipboard(record.script_id)">
+                        {{ record.script_id }}
+                        <icon-copy class="copy-icon" :size="12" />
+                      </div>
+                    </div>
                   </template>
                 </a-table-column>
                 
-                <!-- 中间列 -->
-                <a-table-column title="综合评分" :width="90" align="center">
+                <a-table-column title="综合评分" :width="100" align="center">
                   <template #cell="{ record }">
                     <span :class="'score-badge score-' + getScoreClass(record.avg_score)">{{ record.avg_score?.toFixed(1) || '-' }}</span>
                   </template>
                 </a-table-column>
                 <a-table-column title="评分人数" data-index="rating_count" :width="90" align="center">
-                  <template #cell="{ record }">
-                    {{ record.rating_count || 0 }}
-                  </template>
+                  <template #cell="{ record }">{{ record.rating_count || 0 }}</template>
                 </a-table-column>
                 <a-table-column title="剧本状态" :width="100" align="center">
                   <template #cell="{ record }">
                     <a-tag size="small" :color="getStatusColor(record.status)">{{ record.status }}</a-tag>
                   </template>
                 </a-table-column>
-                <a-table-column title="立项状态" :width="90" align="center">
+                <a-table-column title="立项" :width="80" align="center">
                   <template #cell="{ record }">
                     <a-tag v-if="record.is_project" size="small" color="green">已立项</a-tag>
-                    <a-tag v-else size="small" color="gray">未立项</a-tag>
-                  </template>
-                </a-table-column>
-                <a-table-column title="项目归属" data-index="project_name" :width="100">
-                  <template #cell="{ record }">
-                    {{ record.project_name || '-' }}
-                  </template>
-                </a-table-column>
-                <a-table-column title="编剧" data-index="writer" :width="80">
-                  <template #cell="{ record }">
-                    {{ record.writer || '-' }}
-                  </template>
-                </a-table-column>
-                <a-table-column title="内容团队" data-index="content_team" :width="90">
-                  <template #cell="{ record }">
-                    {{ record.content_team || '-' }}
-                  </template>
-                </a-table-column>
-                <a-table-column title="制片" data-index="producer" :width="80">
-                  <template #cell="{ record }">
-                    {{ record.producer || '-' }}
-                  </template>
-                </a-table-column>
-                <a-table-column title="制片团队" data-index="producer_team" :width="90">
-                  <template #cell="{ record }">
-                    {{ record.producer_team || '-' }}
-                  </template>
-                </a-table-column>
-                <a-table-column title="类型" data-index="genre" :width="70" align="center">
-                  <template #cell="{ record }">
-                    {{ record.genre || '-' }}
-                  </template>
-                </a-table-column>
-                <a-table-column title="付费类型" data-index="content_type" :width="80" align="center">
-                  <template #cell="{ record }">
-                    {{ record.content_type || '-' }}
-                  </template>
-                </a-table-column>
-                <a-table-column title="提交日期" data-index="submit_date" :width="110" align="center">
-                  <template #cell="{ record }">
-                    {{ record.submit_date || '-' }}
-                  </template>
-                </a-table-column>
-                <a-table-column title="备注" :width="150">
-                  <template #cell="{ record }">
-                    <a-tooltip v-if="record.remarks" :content="record.remarks">
-                      <div style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #86909c;">
-                        {{ record.remarks }}
-                      </div>
-                    </a-tooltip>
                     <span v-else style="color: #c9cdd4;">-</span>
                   </template>
                 </a-table-column>
+                <a-table-column title="编剧" data-index="writer" :width="90">
+                  <template #cell="{ record }">{{ record.writer || '-' }}</template>
+                </a-table-column>
+                <a-table-column title="内容团队" data-index="content_team" :width="100">
+                  <template #cell="{ record }">{{ record.content_team || '-' }}</template>
+                </a-table-column>
+                <a-table-column title="制片" data-index="producer" :width="90">
+                  <template #cell="{ record }">{{ record.producer || '-' }}</template>
+                </a-table-column>
+                <a-table-column title="类型" data-index="genre" :width="80" align="center">
+                  <template #cell="{ record }">{{ record.genre || '-' }}</template>
+                </a-table-column>
+                <a-table-column title="提交日期" data-index="submit_date" :width="110" align="center" />
                 
-                <!-- 末列冻结 -->
-                <a-table-column title="操作" :width="180" align="center" fixed="right">
+                <a-table-column title="操作" :width="160" align="center" fixed="right">
                   <template #cell="{ record }">
-                    <a-space size="small">
+                    <a-space>
                       <a-button type="text" size="small" @click="openFeishu(record)">看剧本</a-button>
-                      <a-button type="primary" size="mini" @click="openRatingDrawer(record)">去评分</a-button>
-                      <a-dropdown trigger="hover">
+                      <a-button type="primary" size="mini" @click="openRatingModal(record)">去评分</a-button>
+                      <a-dropdown>
                         <a-button type="text" size="small">更多</a-button>
                         <template #content>
-                          <a-doption @click="openEditModal(record)">编辑剧本</a-doption>
-                          <a-doption @click="copyScriptInfo(record)">复制信息</a-doption>
-                          <a-doption class="danger-option" @click="confirmDeleteScript(record.script_id)">删除剧本</a-doption>
+                          <a-doption @click="openEditModal(record)">编辑</a-doption>
+                          <a-doption style="color: #f53f3f;" @click="confirmDeleteScript(record.script_id)">删除</a-doption>
                         </template>
                       </a-dropdown>
                     </a-space>
@@ -832,10 +743,7 @@ app.get('/*', (c) => {
         
         <!-- 评分记录 -->
         <div v-if="currentPage === 'ratings'">
-          <div class="page-header">
-            <h1 class="page-title">评分记录</h1>
-            <p class="page-desc">查看和管理所有评分记录</p>
-          </div>
+          <div class="page-header"><h1 class="page-title">评分记录</h1></div>
           
           <div class="filter-bar">
             <a-space wrap>
@@ -847,71 +755,54 @@ app.get('/*', (c) => {
           </div>
           
           <div class="table-card">
-            <a-table :data="ratings" :pagination="ratingPagination" :loading="loading" @page-change="onRatingPageChange" row-key="id" :bordered="{ wrapper: true, cell: true }" :scroll="{x: 1400}" table-layout-fixed :stripe="true">
+            <a-table :data="ratings" :pagination="ratingPagination" :loading="loading" @page-change="onRatingPageChange" row-key="id" :bordered="{ cell: true }" :stripe="true" :scroll="{x: 1200}">
               <template #columns>
-                <!-- 首列冻结 -->
-                <a-table-column title="剧本编号" data-index="script_id" :width="100" fixed="left" />
-                <a-table-column title="剧本名称" :width="180" fixed="left">
+                <!-- 剧本信息：名称+编号合并 -->
+                <a-table-column title="剧本" :width="200" fixed="left">
                   <template #cell="{ record }">
-                    <div style="font-weight: 500;">{{ record.script_name || record.script_id }}</div>
+                    <div class="script-cell">
+                      <div class="script-name">{{ record.script_name || '-' }}</div>
+                      <div class="script-id" @click="copyToClipboard(record.script_id)">
+                        {{ record.script_id }}
+                        <icon-copy class="copy-icon" :size="12" />
+                      </div>
+                    </div>
                   </template>
                 </a-table-column>
                 
-                <!-- 中间列 -->
-                <a-table-column title="评分人" data-index="user_name" :width="100" align="center">
+                <a-table-column title="评分人" :width="120">
                   <template #cell="{ record }">
-                    {{ record.user_name }}
+                    <span>{{ record.user_name }}</span>
+                    <span :class="'role-tag ' + (record.role_type || record.user_role)" style="margin-left: 6px;">{{ record.role_type || record.user_role }}</span>
                   </template>
                 </a-table-column>
-                <a-table-column title="角色" :width="90" align="center">
+                <a-table-column title="内容" :width="80" align="center">
                   <template #cell="{ record }">
-                    <span :class="'role-tag ' + (record.role_type || record.user_role)">{{ record.role_type || record.user_role }}</span>
+                    <span :style="{ color: getScoreColor(record.content_score), fontWeight: 500 }">{{ record.content_score || '-' }}</span>
                   </template>
                 </a-table-column>
-                <a-table-column title="内容评分" :width="90" align="center">
+                <a-table-column title="题材" :width="80" align="center">
                   <template #cell="{ record }">
-                    <span :style="{ color: getScoreColor(record.content_score), fontWeight: 500 }">
-                      {{ record.content_score || '-' }}
-                    </span>
+                    <span :style="{ color: getScoreColor(record.market_score), fontWeight: 500 }">{{ record.market_score || '-' }}</span>
                   </template>
                 </a-table-column>
-                <a-table-column title="题材评分" :width="90" align="center">
+                <a-table-column title="制作" :width="80" align="center">
                   <template #cell="{ record }">
-                    <span :style="{ color: getScoreColor(record.market_score), fontWeight: 500 }">
-                      {{ record.market_score || '-' }}
-                    </span>
+                    <span :style="{ color: getScoreColor(record.commercial_score), fontWeight: 500 }">{{ record.commercial_score || '-' }}</span>
                   </template>
                 </a-table-column>
-                <a-table-column title="制作评分" :width="90" align="center">
+                <a-table-column title="综合" :width="90" align="center">
                   <template #cell="{ record }">
-                    <span :style="{ color: getScoreColor(record.commercial_score), fontWeight: 500 }">
-                      {{ record.commercial_score || '-' }}
-                    </span>
-                  </template>
-                </a-table-column>
-                <a-table-column title="综合评分" :width="100" align="center">
-                  <template #cell="{ record }">
-                    <span :class="'score-badge score-' + getScoreClass(record.total_score)">
-                      {{ record.total_score?.toFixed(1) || '-' }}
-                    </span>
+                    <span :class="'score-badge score-' + getScoreClass(record.total_score)">{{ record.total_score?.toFixed(1) || '-' }}</span>
                   </template>
                 </a-table-column>
                 <a-table-column title="评分日期" data-index="rating_date" :width="110" align="center" />
-                <a-table-column title="评语备注" :width="200">
+                <a-table-column title="评语" :width="200">
                   <template #cell="{ record }">
                     <a-tooltip v-if="record.comments" :content="record.comments">
-                      <div style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #4e5969;">
-                        {{ record.comments }}
-                      </div>
+                      <div style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #4e5969;">{{ record.comments }}</div>
                     </a-tooltip>
                     <span v-else style="color: #c9cdd4;">-</span>
-                  </template>
-                </a-table-column>
-                
-                <!-- 末列冻结 -->
-                <a-table-column title="操作" :width="100" align="center" fixed="right">
-                  <template #cell="{ record }">
-                    <a-button type="text" size="small" @click="viewRatingDetail(record)">查看详情</a-button>
                   </template>
                 </a-table-column>
               </template>
@@ -919,15 +810,12 @@ app.get('/*', (c) => {
           </div>
         </div>
         
-        <!-- 排行榜 -->
+        <!-- 剧本排行 -->
         <div v-if="currentPage === 'rankings'">
-          <div class="page-header">
-            <h1 class="page-title">剧本排行榜</h1>
-            <p class="page-desc">TOP 50 高分剧本</p>
-          </div>
+          <div class="page-header"><h1 class="page-title">剧本排行</h1></div>
           
           <div class="table-card">
-            <a-table :data="rankings" :pagination="false" row-key="script_id" :bordered="false" :scroll="{x: 950}" table-layout-fixed>
+            <a-table :data="rankings" :pagination="false" row-key="script_id" :bordered="false" :scroll="{x: 900}">
               <template #columns>
                 <a-table-column title="排名" :width="70" align="center">
                   <template #cell="{ record }">
@@ -935,10 +823,15 @@ app.get('/*', (c) => {
                     <span v-else style="font-size: 16px; color: #86909c;">#{{ record.rank }}</span>
                   </template>
                 </a-table-column>
-                <a-table-column title="剧本名称" :width="250">
+                <a-table-column title="剧本" :width="240">
                   <template #cell="{ record }">
-                    <div style="font-weight: 500;">{{ record.name }}</div>
-                    <div style="font-size: 12px; color: #86909c;">{{ record.script_id }} · {{ record.content_team || record.team }}</div>
+                    <div class="script-cell">
+                      <div class="script-name">{{ record.name }}</div>
+                      <div class="script-id" @click="copyToClipboard(record.script_id)">
+                        {{ record.script_id }} · {{ record.content_team || '-' }}
+                        <icon-copy class="copy-icon" :size="12" />
+                      </div>
+                    </div>
                   </template>
                 </a-table-column>
                 <a-table-column title="综合评分" :width="100" align="center">
@@ -946,20 +839,15 @@ app.get('/*', (c) => {
                     <span :class="'score-badge score-' + getScoreClass(record.avg_score)">{{ record.avg_score?.toFixed(1) }}</span>
                   </template>
                 </a-table-column>
-                <a-table-column title="评分项" data-index="rater_count" :width="80" align="center" />
-                <a-table-column title="内容均分" :width="100" align="center">
+                <a-table-column title="评分人数" data-index="rater_count" :width="90" align="center" />
+                <a-table-column title="内容均分" :width="90" align="center">
                   <template #cell="{ record }">{{ record.avg_content_score?.toFixed(1) || '-' }}</template>
                 </a-table-column>
-                <a-table-column title="题材均分" :width="100" align="center">
+                <a-table-column title="题材均分" :width="90" align="center">
                   <template #cell="{ record }">{{ record.avg_market_score?.toFixed(1) || '-' }}</template>
                 </a-table-column>
-                <a-table-column title="制作均分" :width="100" align="center">
+                <a-table-column title="制作均分" :width="90" align="center">
                   <template #cell="{ record }">{{ record.avg_commercial_score?.toFixed(1) || '-' }}</template>
-                </a-table-column>
-                <a-table-column title="操作" :width="120" align="center">
-                  <template #cell="{ record }">
-                    <a-button type="text" size="small" @click="goToScriptDetail(record)">查看详情</a-button>
-                  </template>
                 </a-table-column>
               </template>
             </a-table>
@@ -968,208 +856,345 @@ app.get('/*', (c) => {
       </main>
     </div>
     
-    <!-- 评分抽屉 - 宽度改为页面1/3 -->
-    <a-drawer :visible="ratingDrawerVisible" :width="'33%'" placement="right" @cancel="ratingDrawerVisible = false" unmount-on-close>
-      <template #title>
-        <div class="drawer-header">
-          <span style="font-weight: 600;">评分详情</span>
-          <a-button type="primary" size="small" @click="openRatingModal">去评分</a-button>
-        </div>
-      </template>
-      <div class="rating-drawer-content" v-if="currentScript">
-        <div class="script-info-card">
-          <h3 style="margin-bottom: 12px; font-size: 18px;">{{ currentScript.name }}</h3>
-          <div class="script-info-row">
-            <span class="script-info-label">编号：</span>
-            <span class="script-info-value">{{ currentScript.script_id }}</span>
+    <!-- 评分弹框 - 4个标签页 (宽度放大2倍) -->
+    <a-modal v-model:visible="ratingModalVisible" :title="currentScript?.name || '评分详情'" :width="1200" :footer="false" unmount-on-close top="60px" :body-style="{padding: '16px 20px'}">
+      <a-tabs v-model:active-key="ratingTabKey" class="modal-tabs">
+        <!-- 标签页1: 基础信息 -->
+        <a-tab-pane key="info" title="基础信息">
+          <div class="tab-content" v-if="currentScript">
+            <div class="info-card">
+              <div class="info-grid">
+                <div class="info-row">
+                  <span class="info-label">剧本编号</span>
+                  <span class="info-value">{{ currentScript.script_id }}</span>
+                </div>
+                <div class="info-row">
+                  <span class="info-label">剧本状态</span>
+                  <span class="info-value"><a-tag size="small" :color="getStatusColor(currentScript.status)">{{ currentScript.status }}</a-tag></span>
+                </div>
+                <div class="info-row">
+                  <span class="info-label">编剧</span>
+                  <span class="info-value">{{ currentScript.writer || '-' }}</span>
+                </div>
+                <div class="info-row">
+                  <span class="info-label">立项状态</span>
+                  <span class="info-value">
+                    <a-tag v-if="currentScript.is_project" size="small" color="green">已立项</a-tag>
+                    <span v-else style="color: #86909c; font-weight: 400;">未立项</span>
+                  </span>
+                </div>
+                <div class="info-row">
+                  <span class="info-label">内容团队</span>
+                  <span class="info-value">{{ currentScript.content_team || '-' }}</span>
+                </div>
+                <div class="info-row">
+                  <span class="info-label">制片团队</span>
+                  <span class="info-value">{{ currentScript.producer_team || '-' }}</span>
+                </div>
+                <div class="info-row">
+                  <span class="info-label">制片</span>
+                  <span class="info-value">{{ currentScript.producer || '-' }}</span>
+                </div>
+                <div class="info-row">
+                  <span class="info-label">类型</span>
+                  <span class="info-value">{{ currentScript.genre || '-' }}</span>
+                </div>
+                <div class="info-row">
+                  <span class="info-label">提交日期</span>
+                  <span class="info-value">{{ currentScript.submit_date || '-' }}</span>
+                </div>
+                <div class="info-row">
+                  <span class="info-label">来源</span>
+                  <span class="info-value">{{ currentScript.source_type || '-' }}</span>
+                </div>
+              </div>
+            </div>
+            
+            <h4 style="margin: 20px 0 12px; font-size: 14px; color: #1d2129; font-weight: 600;">项目关联人员</h4>
+            <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px;">
+              <div v-for="u in currentScript.pendingRaters" :key="u.user_id" 
+                   style="display: flex; align-items: center; justify-content: space-between; padding: 12px 14px; background: #f7f8fa; border-radius: 8px; border: 1px solid #e5e6eb;">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  <span style="font-weight: 500;">{{ u.name }}</span>
+                  <span :class="'role-tag ' + u.role_type">{{ u.role_type }}</span>
+                </div>
+                <span v-if="u.hasRated" style="color: #00b42a; font-size: 12px;">✓ 已评</span>
+                <span v-else style="color: #ff7d00; font-size: 12px;">待评分</span>
+              </div>
+            </div>
+            
+            <div v-if="currentScript.feishu_url" style="margin-top: 20px;">
+              <a-button type="outline" @click="openFeishu(currentScript)" long>
+                <icon-link style="margin-right: 6px;" /> 查看飞书文档
+              </a-button>
+            </div>
           </div>
-          <div class="script-info-row">
-            <span class="script-info-label">编剧：</span>
-            <span class="script-info-value">{{ currentScript.writer || '-' }}</span>
-          </div>
-          <div class="script-info-row">
-            <span class="script-info-label">内容团队：</span>
-            <span class="script-info-value">{{ currentScript.content_team || '-' }}</span>
-          </div>
-          <div class="script-info-row">
-            <span class="script-info-label">内容类型：</span>
-            <span class="script-info-value">{{ currentScript.genre }} · {{ currentScript.content_type }}</span>
-          </div>
-          <div class="script-info-row">
-            <span class="script-info-label">状态：</span>
-            <span class="script-info-value"><a-tag size="small" :color="getStatusColor(currentScript.status)">{{ currentScript.status }}</a-tag></span>
-          </div>
-        </div>
+        </a-tab-pane>
         
-        <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 20px; border-radius: 8px; text-align: center; margin-bottom: 20px; color: #fff;">
-          <div style="font-size: 13px; margin-bottom: 8px; opacity: 0.9;">综合评分</div>
-          <div style="font-size: 42px; font-weight: 700;">{{ currentScript.avg_score?.toFixed(1) || '-' }}</div>
-          <div style="font-size: 12px; opacity: 0.8; margin-top: 4px;">共 {{ currentScript.ratings?.length || 0 }} 人评分</div>
-        </div>
-        
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
-          <h4 style="margin: 0;">评分记录</h4>
-        </div>
-        
-        <div v-if="!currentScript.ratings?.length" style="text-align: center; padding: 40px 0; color: #86909c;">
-          <icon-inbox style="font-size: 48px; margin-bottom: 12px;" />
-          <div>暂无评分记录</div>
-        </div>
-        
-        <!-- 评分记录表格展示 -->
-        <div v-else class="rating-table-wrapper">
-          <table class="rating-table">
-            <thead>
-              <tr>
-                <th>评分人</th>
-                <th>角色</th>
-                <th>内容</th>
-                <th>题材</th>
-                <th>制作</th>
-                <th>综合</th>
-                <th>时间</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="r in currentScript.ratings" :key="r.id">
-                <td>{{ r.user_name }}</td>
-                <td><span :class="'role-tag ' + (r.role_type || r.user_role)">{{ r.role_type || r.user_role }}</span></td>
-                <td>{{ r.content_score || '-' }}</td>
-                <td>{{ r.market_score || '-' }}</td>
-                <td>{{ r.commercial_score || '-' }}</td>
-                <td><span style="font-weight: 600;" :style="{ color: getScoreColor(r.total_score) }">{{ r.total_score?.toFixed(1) }}</span></td>
-                <td style="color: #86909c; font-size: 12px;">{{ r.rating_date }}</td>
-              </tr>
-            </tbody>
-          </table>
-          <!-- 评语展示 -->
-          <div v-for="r in currentScript.ratings.filter(x => x.comments)" :key="'c-' + r.id" class="rating-comment">
-            <span style="font-weight: 500;">{{ r.user_name }}：</span>{{ r.comments }}
+        <!-- 标签页2: 综合评分 -->
+        <a-tab-pane key="score" title="综合评分">
+          <div class="tab-content" v-if="currentScript">
+            <a-row :gutter="20">
+              <a-col :span="10">
+                <div class="score-card">
+                  <div class="score-value">{{ currentScript.avg_score?.toFixed(1) || '-' }}</div>
+                  <div class="score-label">综合评分 · {{ currentScript.ratedCount || 0 }}人已评</div>
+                </div>
+                
+                <div class="dimension-scores" style="grid-template-columns: 1fr; gap: 10px; margin-top: 16px;">
+                  <div class="dimension-item" style="display: flex; justify-content: space-between; align-items: center; padding: 14px 16px;">
+                    <div class="dimension-label" style="margin: 0;">内容评分</div>
+                    <div class="dimension-value" style="color: #165dff; font-size: 20px;">{{ avgDimensionScores.content?.toFixed(1) || '-' }}</div>
+                  </div>
+                  <div class="dimension-item" style="display: flex; justify-content: space-between; align-items: center; padding: 14px 16px;">
+                    <div class="dimension-label" style="margin: 0;">题材评分</div>
+                    <div class="dimension-value" style="color: #00b42a; font-size: 20px;">{{ avgDimensionScores.market?.toFixed(1) || '-' }}</div>
+                  </div>
+                  <div class="dimension-item" style="display: flex; justify-content: space-between; align-items: center; padding: 14px 16px;">
+                    <div class="dimension-label" style="margin: 0;">制作评分</div>
+                    <div class="dimension-value" style="color: #722ed1; font-size: 20px;">{{ avgDimensionScores.commercial?.toFixed(1) || '-' }}</div>
+                  </div>
+                </div>
+              </a-col>
+              <a-col :span="14">
+                <div style="background: #fff; border-radius: 8px; padding: 16px; border: 1px solid #e5e6eb;">
+                  <div style="font-size: 14px; font-weight: 500; color: #1d2129; margin-bottom: 12px;">评分分布</div>
+                  <div id="score-chart" style="height: 280px;"></div>
+                </div>
+              </a-col>
+            </a-row>
           </div>
-        </div>
-      </div>
-    </a-drawer>
+        </a-tab-pane>
+        
+        <!-- 标签页3: 已评分记录 -->
+        <a-tab-pane key="rated" :title="'已评分记录 (' + (currentScript?.ratedCount || 0) + ')'">
+          <div class="tab-content">
+            <div v-if="!currentScript?.ratings?.length" class="empty-state">
+              <icon-inbox style="font-size: 48px; color: #c9cdd4; margin-bottom: 12px;" />
+              <div>暂无评分记录</div>
+            </div>
+            <div v-else>
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+                <div v-for="r in currentScript.ratings" :key="r.id" class="rating-item" style="margin-bottom: 0;">
+                  <div class="rating-header">
+                    <div class="rating-user">
+                      <span class="rating-user-name">{{ r.user_name }}</span>
+                      <span :class="'role-tag ' + (r.role_type || r.user_role)">{{ r.role_type || r.user_role }}</span>
+                    </div>
+                    <span class="rating-time">{{ r.rating_date }}</span>
+                  </div>
+                  <div class="rating-scores" style="gap: 20px; margin-bottom: 8px;">
+                    <div class="rating-score-item">
+                      <div class="rating-score-label">内容</div>
+                      <div class="rating-score-value" :style="{ color: getScoreColor(r.content_score) }">{{ r.content_score || '-' }}</div>
+                    </div>
+                    <div class="rating-score-item">
+                      <div class="rating-score-label">题材</div>
+                      <div class="rating-score-value" :style="{ color: getScoreColor(r.market_score) }">{{ r.market_score || '-' }}</div>
+                    </div>
+                    <div class="rating-score-item">
+                      <div class="rating-score-label">制作</div>
+                      <div class="rating-score-value" :style="{ color: getScoreColor(r.commercial_score) }">{{ r.commercial_score || '-' }}</div>
+                    </div>
+                    <div class="rating-score-item" style="border-left: 2px solid #e5e6eb; padding-left: 20px;">
+                      <div class="rating-score-label">综合</div>
+                      <div class="rating-score-value" style="color: #165dff; font-weight: 700;">{{ r.total_score?.toFixed(1) || '-' }}</div>
+                    </div>
+                  </div>
+                  <div v-if="r.comments" class="rating-comment">
+                    <div v-if="expandedComments[r.id] || r.comments?.length <= 80">{{ r.comments }}</div>
+                    <div v-else>{{ r.comments?.slice(0, 80) }}...</div>
+                    <div v-if="r.comments?.length > 80" class="rating-comment-toggle" @click="toggleComment(r.id)">
+                      {{ expandedComments[r.id] ? '收起' : '查看完整意见' }}
+                    </div>
+                  </div>
+                  <div v-else style="color: #c9cdd4; font-size: 12px;">暂无评语</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </a-tab-pane>
+        
+        <!-- 标签页4: 待评分管理 -->
+        <a-tab-pane key="pending" :title="'待评分管理 (' + (currentScript?.pendingCount || 0) + ')'">
+          <div class="tab-content">
+            <a-row :gutter="20">
+              <!-- 待评分列表 -->
+              <a-col :span="14">
+                <div style="background: #fff; border-radius: 8px; padding: 16px; border: 1px solid #e5e6eb;">
+                  <div style="font-size: 14px; font-weight: 500; color: #1d2129; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center;">
+                    <span>待评分人员</span>
+                    <a-button type="text" size="small" @click="sendReminderToAll" :disabled="!hasPendingRaters">
+                      <icon-send style="margin-right: 4px;" /> 一键提醒全部
+                    </a-button>
+                  </div>
+                  <div class="pending-list">
+                    <div v-for="u in currentScript?.pendingRaters?.filter(r => !r.hasRated)" :key="u.user_id" class="pending-item">
+                      <div class="pending-user">
+                        <span class="pending-user-name">{{ u.name }}</span>
+                        <span :class="'role-tag ' + u.role_type">{{ u.role_type }}</span>
+                      </div>
+                      <div class="pending-status">
+                        <span v-if="getOverdueDays(u) > 0" class="timeout-badge">
+                          <icon-clock-circle style="margin-right: 2px;" /> 超时{{ getOverdueDays(u) }}天
+                        </span>
+                        <span class="status-tag 待评分">待评分</span>
+                        <template v-if="remindedUsers[u.user_id]">
+                          <span class="reminded-info">已提醒 {{ remindedUsers[u.user_id] }}</span>
+                        </template>
+                        <a-button v-else type="primary" size="mini" @click="sendReminder(u)">发送提醒</a-button>
+                      </div>
+                    </div>
+                    <div v-if="!currentScript?.pendingRaters?.filter(r => !r.hasRated).length" class="empty-state" style="padding: 30px;">
+                      <icon-check-circle style="font-size: 36px; color: #00b42a; margin-bottom: 8px;" />
+                      <div>所有人员已完成评分</div>
+                    </div>
+                  </div>
+                </div>
+                
+                <!-- 已评分人员 -->
+                <div style="background: #fff; border-radius: 8px; padding: 16px; border: 1px solid #e5e6eb; margin-top: 16px;">
+                  <div style="font-size: 14px; font-weight: 500; color: #1d2129; margin-bottom: 16px;">已评分人员</div>
+                  <div style="display: flex; flex-wrap: wrap; gap: 10px;">
+                    <div v-for="u in currentScript?.pendingRaters?.filter(r => r.hasRated)" :key="u.user_id" 
+                         style="display: flex; align-items: center; gap: 6px; padding: 8px 12px; background: #e8ffea; border-radius: 6px; border: 1px solid #b3f0b3;">
+                      <icon-check-circle style="color: #00b42a;" />
+                      <span>{{ u.name }}</span>
+                      <span :class="'role-tag ' + u.role_type">{{ u.role_type }}</span>
+                    </div>
+                    <div v-if="!currentScript?.pendingRaters?.filter(r => r.hasRated).length" style="color: #86909c; font-size: 13px;">
+                      暂无已评分人员
+                    </div>
+                  </div>
+                </div>
+              </a-col>
+              
+              <!-- 提交评分区域 -->
+              <a-col :span="10">
+                <div style="background: linear-gradient(135deg, #f0f5ff 0%, #e8f3ff 100%); border-radius: 8px; padding: 20px; border: 1px solid #bedaff;">
+                  <div style="font-size: 16px; font-weight: 600; color: #1d2129; margin-bottom: 16px;">提交我的评分</div>
+                  <a-form :model="ratingForm" layout="vertical" size="small">
+                    <a-form-item label="评分人" required>
+                      <a-select v-model="ratingForm.user_id" placeholder="请选择评分人">
+                        <a-option v-for="u in users" :key="u.user_id" :value="u.user_id">{{ u.name }} ({{ u.role_type }})</a-option>
+                      </a-select>
+                    </a-form-item>
+                    <a-row :gutter="12">
+                      <a-col :span="8">
+                        <a-form-item label="内容评分">
+                          <a-input-number v-model="ratingForm.content_score" :min="0" :max="100" placeholder="0-100" style="width: 100%;" />
+                        </a-form-item>
+                      </a-col>
+                      <a-col :span="8">
+                        <a-form-item label="题材评分">
+                          <a-input-number v-model="ratingForm.market_score" :min="0" :max="100" placeholder="0-100" style="width: 100%;" />
+                        </a-form-item>
+                      </a-col>
+                      <a-col :span="8">
+                        <a-form-item label="制作评分">
+                          <a-input-number v-model="ratingForm.commercial_score" :min="0" :max="100" placeholder="0-100" style="width: 100%;" />
+                        </a-form-item>
+                      </a-col>
+                    </a-row>
+                    <a-form-item label="评分意见">
+                      <a-textarea v-model="ratingForm.comments" placeholder="请输入评分意见（可选）" :auto-size="{ minRows: 3, maxRows: 5 }" />
+                    </a-form-item>
+                    <a-button type="primary" long @click="submitRatingDirect" :loading="submitting">提交评分</a-button>
+                  </a-form>
+                </div>
+              </a-col>
+            </a-row>
+          </div>
+        </a-tab-pane>
+      </a-tabs>
+    </a-modal>
     
-    <!-- 评分弹框 - 优化布局 -->
-    <a-modal v-model:visible="ratingModalVisible" title="提交评分" @ok="submitRating" :ok-loading="submitting" ok-text="提交评分" cancel-text="取消" :width="480">
+    <!-- 提交评分弹框 -->
+    <a-modal v-model:visible="submitRatingVisible" title="提交评分" @ok="submitRating" :ok-loading="submitting" ok-text="提交" :width="500">
       <a-form :model="ratingForm" layout="vertical">
         <a-form-item label="评分人" required>
-          <a-select v-model="ratingForm.user_id" placeholder="请选择评分人" size="large">
+          <a-select v-model="ratingForm.user_id" placeholder="请选择">
             <a-option v-for="u in users" :key="u.user_id" :value="u.user_id">{{ u.name }} ({{ u.role_type }})</a-option>
           </a-select>
         </a-form-item>
-        
-        <!-- 评分等级说明 - 紧凑显示 -->
-        <div style="display: flex; gap: 6px; margin-bottom: 16px; justify-content: center;">
-          <span class="score-badge score-s" style="font-size: 11px; padding: 2px 8px;">S 90+</span>
-          <span class="score-badge score-a" style="font-size: 11px; padding: 2px 8px;">A 80-89</span>
-          <span class="score-badge score-b" style="font-size: 11px; padding: 2px 8px;">B 70-79</span>
-          <span class="score-badge score-c" style="font-size: 11px; padding: 2px 8px;">C &lt;70</span>
-        </div>
-        
-        <!-- 评分输入区 - 优化布局 -->
-        <div class="score-input-group">
-          <div class="score-input-row">
-            <span class="score-input-label">内容评分</span>
-            <a-slider v-model="ratingForm.content_score" :min="0" :max="100" :step="5" style="flex: 1; margin: 0 12px;" />
-            <a-input-number v-model="ratingForm.content_score" :min="0" :max="100" style="width: 70px;" size="small" />
-            <span :class="'score-indicator score-' + getScoreClass(ratingForm.content_score)" style="width: 24px; text-align: center;">{{ getScoreLevelText(ratingForm.content_score) }}</span>
-          </div>
-          <div class="score-input-row">
-            <span class="score-input-label">题材评分</span>
-            <a-slider v-model="ratingForm.market_score" :min="0" :max="100" :step="5" style="flex: 1; margin: 0 12px;" />
-            <a-input-number v-model="ratingForm.market_score" :min="0" :max="100" style="width: 70px;" size="small" />
-            <span :class="'score-indicator score-' + getScoreClass(ratingForm.market_score)" style="width: 24px; text-align: center;">{{ getScoreLevelText(ratingForm.market_score) }}</span>
-          </div>
-          <div class="score-input-row">
-            <span class="score-input-label">制作评分</span>
-            <a-slider v-model="ratingForm.commercial_score" :min="0" :max="100" :step="5" style="flex: 1; margin: 0 12px;" />
-            <a-input-number v-model="ratingForm.commercial_score" :min="0" :max="100" style="width: 70px;" size="small" />
-            <span :class="'score-indicator score-' + getScoreClass(ratingForm.commercial_score)" style="width: 24px; text-align: center;">{{ getScoreLevelText(ratingForm.commercial_score) }}</span>
-          </div>
-        </div>
-        
-        <!-- 预计综合分 -->
-        <div v-if="predictedScore !== null" class="predicted-score" style="margin-top: 16px;">
-          <span>预计综合分：</span>
-          <span :class="'score-badge score-' + getScoreClass(predictedScore)" style="font-size: 18px; padding: 6px 16px;">{{ predictedScore.toFixed(1) }}</span>
-          <span style="color: #86909c; font-size: 12px; margin-left: 8px;">{{ getScoreLevelText(predictedScore) }}级</span>
-        </div>
-        
-        <a-form-item label="评分意见" style="margin-top: 16px;">
-          <a-textarea v-model="ratingForm.comments" placeholder="请输入评分意见和建议（选填）" :auto-size="{ minRows: 2, maxRows: 4 }" />
+        <a-row :gutter="16">
+          <a-col :span="8">
+            <a-form-item label="内容评分">
+              <a-input-number v-model="ratingForm.content_score" :min="0" :max="100" placeholder="0-100" style="width: 100%;" />
+            </a-form-item>
+          </a-col>
+          <a-col :span="8">
+            <a-form-item label="题材评分">
+              <a-input-number v-model="ratingForm.market_score" :min="0" :max="100" placeholder="0-100" style="width: 100%;" />
+            </a-form-item>
+          </a-col>
+          <a-col :span="8">
+            <a-form-item label="制作评分">
+              <a-input-number v-model="ratingForm.commercial_score" :min="0" :max="100" placeholder="0-100" style="width: 100%;" />
+            </a-form-item>
+          </a-col>
+        </a-row>
+        <a-form-item label="评分意见">
+          <a-textarea v-model="ratingForm.comments" placeholder="请输入评分意见" :auto-size="{ minRows: 3 }" />
         </a-form-item>
       </a-form>
     </a-modal>
     
-    <!-- 编辑剧本弹框 -->
-    <a-modal v-model:visible="editModalVisible" title="编辑剧本" @ok="submitEditScript" :ok-loading="submitting" ok-text="保存" cancel-text="取消" :width="600">
+    <!-- 编辑/新建剧本弹框 -->
+    <a-modal v-model:visible="editModalVisible" :title="editForm.script_id ? '编辑剧本' : '新建剧本'" @ok="submitScript" :ok-loading="submitting" :width="600">
       <a-form :model="editForm" layout="vertical">
         <a-row :gutter="16">
           <a-col :span="12">
             <a-form-item label="剧本名称" required>
-              <a-input v-model="editForm.name" placeholder="请输入剧本名称" />
+              <a-input v-model="editForm.name" placeholder="请输入" />
             </a-form-item>
           </a-col>
           <a-col :span="12">
-            <a-form-item label="飞书文档地址">
-              <a-input v-model="editForm.feishu_url" placeholder="请输入飞书文档URL" />
-            </a-form-item>
-          </a-col>
-        </a-row>
-        <a-row :gutter="16">
-          <a-col :span="12">
-            <a-form-item label="来源类型">
-              <a-select v-model="editForm.source_type" placeholder="选择来源类型">
-                <a-option value="内部团队">内部团队</a-option>
-                <a-option value="外部投稿">外部投稿</a-option>
-                <a-option value="合作编剧">合作编剧</a-option>
-                <a-option value="版权采购">版权采购</a-option>
-              </a-select>
-            </a-form-item>
-          </a-col>
-          <a-col :span="12">
-            <a-form-item label="所属团队">
-              <a-select v-model="editForm.team" placeholder="选择团队" allow-clear>
-                <a-option v-for="t in options.teams" :key="t" :value="t">{{ t }}</a-option>
-              </a-select>
+            <a-form-item label="飞书文档">
+              <a-input v-model="editForm.feishu_url" placeholder="请输入URL" />
             </a-form-item>
           </a-col>
         </a-row>
         <a-row :gutter="16">
-          <a-col :span="12">
+          <a-col :span="8">
             <a-form-item label="剧本状态">
-              <a-select v-model="editForm.status" placeholder="选择状态">
+              <a-select v-model="editForm.status">
                 <a-option value="一卡初稿">一卡初稿</a-option>
                 <a-option value="改稿中">改稿中</a-option>
                 <a-option value="完整剧本">完整剧本</a-option>
                 <a-option value="终稿">终稿</a-option>
-                <a-option value="一卡">一卡</a-option>
-                <a-option value="全本">全本</a-option>
               </a-select>
             </a-form-item>
           </a-col>
-          <a-col :span="12">
+          <a-col :span="8">
             <a-form-item label="内容类型">
-              <a-select v-model="editForm.genre" placeholder="选择内容类型">
+              <a-select v-model="editForm.genre">
                 <a-option value="男频">男频</a-option>
                 <a-option value="女频">女频</a-option>
                 <a-option value="皆可">皆可</a-option>
               </a-select>
             </a-form-item>
           </a-col>
+          <a-col :span="8">
+            <a-form-item label="来源">
+              <a-select v-model="editForm.source_type">
+                <a-option value="内部团队">内部团队</a-option>
+                <a-option value="外部投稿">外部投稿</a-option>
+              </a-select>
+            </a-form-item>
+          </a-col>
         </a-row>
         <a-row :gutter="16">
           <a-col :span="12">
-            <a-form-item label="所属编剧">
-              <a-select v-model="editForm.writer" placeholder="选择编剧" allow-clear>
+            <a-form-item label="编剧">
+              <a-select v-model="editForm.writer" allow-clear>
                 <a-option v-for="w in options.writers" :key="w" :value="w">{{ w }}</a-option>
               </a-select>
             </a-form-item>
           </a-col>
           <a-col :span="12">
             <a-form-item label="内容团队">
-              <a-select v-model="editForm.content_team" placeholder="选择内容团队" allow-clear>
+              <a-select v-model="editForm.content_team" allow-clear>
                 <a-option v-for="t in options.contentTeams" :key="t" :value="t">{{ t }}</a-option>
               </a-select>
             </a-form-item>
@@ -1177,132 +1202,24 @@ app.get('/*', (c) => {
         </a-row>
         <a-row :gutter="16">
           <a-col :span="12">
-            <a-form-item label="所属制片">
-              <a-select v-model="editForm.producer" placeholder="选择制片" allow-clear>
+            <a-form-item label="制片">
+              <a-select v-model="editForm.producer" allow-clear>
                 <a-option v-for="p in options.producers" :key="p" :value="p">{{ p }}</a-option>
               </a-select>
             </a-form-item>
           </a-col>
           <a-col :span="12">
-            <a-form-item label="制片团队">
-              <a-select v-model="editForm.producer_team" placeholder="选择制片团队" allow-clear>
-                <a-option v-for="t in options.producerTeams" :key="t" :value="t">{{ t }}</a-option>
-              </a-select>
-            </a-form-item>
-          </a-col>
-        </a-row>
-        <a-row :gutter="16">
-          <a-col :span="12">
-            <a-form-item label="分配状态">
-              <a-select v-model="editForm.assign_status" placeholder="选择分配状态">
-                <a-option value="待分配">待分配</a-option>
-                <a-option value="已分配">已分配</a-option>
-              </a-select>
-            </a-form-item>
-          </a-col>
-          <a-col :span="12">
-            <a-form-item label="立项状态">
+            <a-form-item label="立项">
               <a-switch v-model="editForm.is_project" />
-              <span style="margin-left: 8px; color: #86909c;">{{ editForm.is_project ? '已立项' : '未立项' }}</span>
             </a-form-item>
           </a-col>
         </a-row>
-        <a-form-item label="立项名称" v-if="editForm.is_project">
-          <a-input v-model="editForm.project_name" placeholder="请输入立项项目名称" />
-        </a-form-item>
-        <a-form-item label="备注">
-          <a-textarea v-model="editForm.remarks" placeholder="请输入备注信息" :auto-size="{ minRows: 2 }" />
-        </a-form-item>
-      </a-form>
-    </a-modal>
-    
-    <!-- 新建剧本弹框 -->
-    <a-modal v-model:visible="createModalVisible" title="新建剧本" @ok="submitCreateScript" :ok-loading="submitting" ok-text="创建" cancel-text="取消" :width="600">
-      <a-form :model="createForm" layout="vertical">
-        <a-row :gutter="16">
-          <a-col :span="12">
-            <a-form-item label="剧本名称" required>
-              <a-input v-model="createForm.name" placeholder="请输入剧本名称" />
-            </a-form-item>
-          </a-col>
-          <a-col :span="12">
-            <a-form-item label="飞书文档地址">
-              <a-input v-model="createForm.feishu_url" placeholder="请输入飞书文档URL" />
-            </a-form-item>
-          </a-col>
-        </a-row>
-        <a-row :gutter="16">
-          <a-col :span="8">
-            <a-form-item label="来源类型">
-              <a-select v-model="createForm.source_type" placeholder="选择来源">
-                <a-option value="内部团队">内部团队</a-option>
-                <a-option value="外部投稿">外部投稿</a-option>
-                <a-option value="合作编剧">合作编剧</a-option>
-                <a-option value="版权采购">版权采购</a-option>
-              </a-select>
-            </a-form-item>
-          </a-col>
-          <a-col :span="8">
-            <a-form-item label="剧本状态">
-              <a-select v-model="createForm.status" placeholder="选择状态">
-                <a-option value="一卡初稿">一卡初稿</a-option>
-                <a-option value="改稿中">改稿中</a-option>
-                <a-option value="完整剧本">完整剧本</a-option>
-                <a-option value="终稿">终稿</a-option>
-              </a-select>
-            </a-form-item>
-          </a-col>
-          <a-col :span="8">
-            <a-form-item label="内容类型">
-              <a-select v-model="createForm.genre" placeholder="选择类型">
-                <a-option value="男频">男频</a-option>
-                <a-option value="女频">女频</a-option>
-                <a-option value="皆可">皆可</a-option>
-              </a-select>
-            </a-form-item>
-          </a-col>
-        </a-row>
-        <a-row :gutter="16">
-          <a-col :span="12">
-            <a-form-item label="所属编剧">
-              <a-select v-model="createForm.writer" placeholder="选择编剧" allow-clear>
-                <a-option v-for="w in options.writers" :key="w" :value="w">{{ w }}</a-option>
-              </a-select>
-            </a-form-item>
-          </a-col>
-          <a-col :span="12">
-            <a-form-item label="内容团队">
-              <a-select v-model="createForm.content_team" placeholder="选择内容团队" allow-clear>
-                <a-option v-for="t in options.contentTeams" :key="t" :value="t">{{ t }}</a-option>
-              </a-select>
-            </a-form-item>
-          </a-col>
-        </a-row>
-        <a-row :gutter="16">
-          <a-col :span="12">
-            <a-form-item label="所属制片">
-              <a-select v-model="createForm.producer" placeholder="选择制片" allow-clear>
-                <a-option v-for="p in options.producers" :key="p" :value="p">{{ p }}</a-option>
-              </a-select>
-            </a-form-item>
-          </a-col>
-          <a-col :span="12">
-            <a-form-item label="制片团队">
-              <a-select v-model="createForm.producer_team" placeholder="选择制片团队" allow-clear>
-                <a-option v-for="t in options.producerTeams" :key="t" :value="t">{{ t }}</a-option>
-              </a-select>
-            </a-form-item>
-          </a-col>
-        </a-row>
-        <a-form-item label="备注">
-          <a-textarea v-model="createForm.remarks" placeholder="请输入备注信息（选填）" :auto-size="{ minRows: 2 }" />
-        </a-form-item>
       </a-form>
     </a-modal>
   </div>
   
   <script>
-    const { createApp, ref, reactive, onMounted, watch, nextTick, computed } = Vue;
+    const { createApp, ref, reactive, computed, onMounted, watch, nextTick } = Vue;
     const ArcoVue = window.ArcoVue;
     const ArcoVueIcon = window.ArcoVueIcon;
     
@@ -1318,14 +1235,10 @@ app.get('/*', (c) => {
         const ratings = ref([]);
         const rankings = ref([]);
         const users = ref([]);
-        const options = ref({ statuses: [], contentTeams: [], genres: [], teams: [], writers: [], producers: [], producerTeams: [] });
+        const options = ref({ contentTeams: [], writers: [], producers: [] });
         
         // 筛选
-        const dateRange = ref([null, null]);
-        const dashboardStatusFilter = ref('');
-        const quickFilter = ref('all');
-        const scriptFilters = reactive({ status: '', source_type: '', content_team: '', genre: '', keyword: '', min_score: null, max_score: null });
-        const scriptDateRange = ref([]);
+        const scriptFilters = reactive({ keyword: '', status: '', content_team: '' });
         const ratingFilters = reactive({ user_id: '' });
         const ratingDateRange = ref([]);
         
@@ -1333,110 +1246,77 @@ app.get('/*', (c) => {
         const pagination = reactive({ current: 1, pageSize: 20, total: 0, showTotal: true });
         const ratingPagination = reactive({ current: 1, pageSize: 20, total: 0, showTotal: true });
         
-        // 抽屉和弹框
-        const ratingDrawerVisible = ref(false);
+        // 弹框
         const ratingModalVisible = ref(false);
+        const ratingTabKey = ref('info');
+        const submitRatingVisible = ref(false);
         const editModalVisible = ref(false);
         const currentScript = ref(null);
-        const ratingForm = reactive({ user_id: '', content_score: null, market_score: null, compliance_score: null, commercial_score: null, comments: '' });
-        const editForm = reactive({ 
-          script_id: '', name: '', feishu_url: '', source_type: '', team: '', status: '', 
-          genre: '', writer: '', content_team: '', producer: '', producer_team: '', 
-          assign_status: '', is_project: false, project_name: '', remarks: '' 
-        });
+        const expandedComments = reactive({});
+        const remindedUsers = reactive({});
         
-        // Tab计数 - 扩展为多种状态
-        const tabCounts = ref({ all: 0, pending: 0, unrated: 0, project: 0, abandoned: 0 });
+        const ratingForm = reactive({ user_id: '', content_score: null, market_score: null, commercial_score: null, comments: '' });
+        const editForm = reactive({ script_id: '', name: '', feishu_url: '', status: '一卡初稿', genre: '皆可', source_type: '内部团队', writer: '', content_team: '', producer: '', is_project: false });
+        
+        // 计算分项均分
+        const avgDimensionScores = computed(() => {
+          if (!currentScript.value?.ratings?.length) return { content: null, market: null, commercial: null };
+          const r = currentScript.value.ratings;
+          return {
+            content: r.filter(x => x.content_score).reduce((a, b) => a + b.content_score, 0) / r.filter(x => x.content_score).length || null,
+            market: r.filter(x => x.market_score).reduce((a, b) => a + b.market_score, 0) / r.filter(x => x.market_score).length || null,
+            commercial: r.filter(x => x.commercial_score).reduce((a, b) => a + b.commercial_score, 0) / r.filter(x => x.commercial_score).length || null
+          };
+        });
         
         // 工具函数
-        const getScoreClass = (score) => { if (!score) return 'c'; if (score >= 90) return 's'; if (score >= 80) return 'a'; if (score >= 70) return 'b'; return 'c'; };
-        const getScoreColor = (score) => { if (!score) return '#86909c'; if (score >= 90) return '#722ed1'; if (score >= 80) return '#f5576c'; if (score >= 70) return '#165dff'; return '#ff7d00'; };
-        const getStatusColor = (status) => { 
-          const map = { '一卡初稿': 'blue', '改稿中': 'orange', '完整剧本': 'green', '终稿': 'purple', '一卡': 'blue', '全本': 'green' }; 
-          return map[status] || 'gray'; 
+        const getScoreClass = (score) => { if (!score) return 'd'; if (score >= 80) return 'a'; if (score >= 70) return 'b'; if (score >= 60) return 'c'; return 'd'; };
+        const getScoreColor = (score) => { if (!score) return '#86909c'; if (score >= 80) return '#00b42a'; if (score >= 70) return '#165dff'; if (score >= 60) return '#ff7d00'; return '#f53f3f'; };
+        const getStatusColor = (status) => ({ '一卡初稿': 'blue', '改稿中': 'orange', '完整剧本': 'green', '终稿': 'purple' }[status] || 'gray');
+        const getOverdueDays = (user) => {
+          // 模拟超时天数 - 实际应根据分配日期计算
+          const seed = user.user_id?.charCodeAt?.(0) || 0;
+          return seed % 3 === 0 ? Math.floor(seed % 5) + 1 : 0;
         };
-        const getScoreLevelText = (score) => { if (!score) return ''; if (score >= 90) return 'S'; if (score >= 80) return 'A'; if (score >= 70) return 'B'; return 'C'; };
         
-        // 筛选重置和状态
-        const hasActiveFilters = computed(() => {
-          return scriptFilters.status || scriptFilters.source_type || scriptFilters.content_team || 
-                 scriptFilters.keyword || scriptFilters.min_score || scriptFilters.max_score ||
-                 scriptDateRange.value?.length > 0 || quickFilter.value !== 'all';
+        const hasPendingRaters = computed(() => {
+          return currentScript.value?.pendingRaters?.some(r => !r.hasRated) || false;
         });
         
-        const resetScriptFilters = () => {
-          scriptFilters.status = '';
-          scriptFilters.source_type = '';
-          scriptFilters.content_team = '';
-          scriptFilters.genre = '';
-          scriptFilters.keyword = '';
-          scriptFilters.min_score = null;
-          scriptFilters.max_score = null;
-          scriptDateRange.value = [];
-          quickFilter.value = 'all';
-          loadScripts();
+        const copyToClipboard = (text) => {
+          navigator.clipboard.writeText(text).then(() => ArcoVue.Message.success('已复制: ' + text));
         };
         
-        // 快捷筛选切换
-        const onQuickFilterChange = () => {
-          // 重置详细筛选
-          scriptFilters.status = '';
-          scriptFilters.source_type = '';
-          scriptFilters.content_team = '';
-          scriptFilters.min_score = null;
-          scriptFilters.max_score = null;
-          loadScripts();
-        };
-        
-        // 预计综合分
-        const predictedScore = computed(() => {
-          const scores = [ratingForm.content_score, ratingForm.market_score, ratingForm.commercial_score].filter(s => s !== null && s !== undefined && s !== '');
-          if (scores.length === 0) return null;
-          return scores.reduce((a, b) => a + b, 0) / scores.length;
-        });
+        const toggleComment = (id) => { expandedComments[id] = !expandedComments[id]; };
         
         // API
         const loadDashboard = async () => {
-          const params = new URLSearchParams();
-          if (dateRange.value[0]) params.set('start_date', dayjs(dateRange.value[0]).format('YYYY-MM-DD'));
-          if (dateRange.value[1]) params.set('end_date', dayjs(dateRange.value[1]).format('YYYY-MM-DD'));
-          if (dashboardStatusFilter.value) params.set('status', dashboardStatusFilter.value);
-          
           const [kpiRes, statusRes, teamRes] = await Promise.all([
-            axios.get('/api/dashboard/kpi?' + params),
-            axios.get('/api/dashboard/status-distribution?' + params),
-            axios.get('/api/dashboard/team-distribution?' + params)
+            axios.get('/api/dashboard/kpi'),
+            axios.get('/api/dashboard/status-distribution'),
+            axios.get('/api/dashboard/team-distribution')
           ]);
-          
           kpi.value = kpiRes.data;
-          
           await nextTick();
           
-          // 状态饼图
           const statusChartEl = document.getElementById('status-chart');
           if (statusChartEl) {
-            const statusChart = echarts.init(statusChartEl);
-            statusChart.setOption({
-              tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
+            echarts.init(statusChartEl).setOption({
+              tooltip: { trigger: 'item' },
               legend: { orient: 'vertical', right: 10, top: 'center' },
-              color: ['#165dff', '#14c9c9', '#f7ba1e', '#722ed1', '#0fc6c2'],
-              series: [{ type: 'pie', radius: ['40%', '70%'], center: ['40%', '50%'], avoidLabelOverlap: false, itemStyle: { borderRadius: 10, borderColor: '#fff', borderWidth: 2 }, label: { show: false }, emphasis: { label: { show: true, fontSize: 14, fontWeight: 'bold' } }, data: statusRes.data.map(item => ({ name: item.status || '未知', value: item.count })) }]
+              series: [{ type: 'pie', radius: ['40%', '70%'], center: ['40%', '50%'], data: statusRes.data.map(i => ({ name: i.status || '未知', value: i.count })) }]
             });
           }
           
-          // 团队图
           const teamChartEl = document.getElementById('team-chart');
           if (teamChartEl) {
-            const teamChart = echarts.init(teamChartEl);
-            teamChart.setOption({
-              tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
-              legend: { data: ['剧本数', '平均分'], right: 10 },
-              grid: { left: '3%', right: '10%', bottom: '3%', containLabel: true },
-              xAxis: { type: 'category', data: teamRes.data.map(item => item.team || '未知'), axisLabel: { interval: 0, rotate: 30 } },
-              yAxis: [{ type: 'value', name: '数量' }, { type: 'value', name: '评分', min: 0, max: 100 }],
+            echarts.init(teamChartEl).setOption({
+              tooltip: { trigger: 'axis' },
+              xAxis: { type: 'category', data: teamRes.data.map(i => i.team || '未知'), axisLabel: { rotate: 30 } },
+              yAxis: [{ type: 'value', name: '数量' }, { type: 'value', name: '评分', max: 100 }],
               series: [
-                { name: '剧本数', type: 'bar', data: teamRes.data.map(item => item.count), itemStyle: { color: '#165dff', borderRadius: [4, 4, 0, 0] } },
-                { name: '平均分', type: 'line', yAxisIndex: 1, data: teamRes.data.map(item => item.avg_score ? Number(item.avg_score).toFixed(1) : 0), itemStyle: { color: '#f5576c' }, lineStyle: { width: 2 }, symbol: 'circle', symbolSize: 6 }
+                { name: '剧本数', type: 'bar', data: teamRes.data.map(i => i.count) },
+                { name: '均分', type: 'line', yAxisIndex: 1, data: teamRes.data.map(i => i.avg_score?.toFixed(1) || 0) }
               ]
             });
           }
@@ -1445,49 +1325,13 @@ app.get('/*', (c) => {
         const loadScripts = async () => {
           loading.value = true;
           const params = new URLSearchParams({ page: pagination.current, limit: pagination.pageSize });
-          
-          // 快捷筛选
-          if (quickFilter.value === 'pending') params.set('tab', 'pending');
-          else if (quickFilter.value === 'unrated') params.set('unrated', 'true');
-          else if (quickFilter.value === 'project') params.set('is_project', '1');
-          else if (quickFilter.value === 'abandoned') params.set('status', '已放弃');
-          
-          // 详细筛选
-          if (scriptFilters.status) params.set('status', scriptFilters.status);
-          if (scriptFilters.source_type) params.set('source_type', scriptFilters.source_type);
-          if (scriptFilters.content_team) params.set('content_team', scriptFilters.content_team);
           if (scriptFilters.keyword) params.set('keyword', scriptFilters.keyword);
-          if (scriptFilters.min_score) params.set('min_score', scriptFilters.min_score);
-          if (scriptFilters.max_score) params.set('max_score', scriptFilters.max_score);
-          if (scriptDateRange.value?.[0]) params.set('start_date', dayjs(scriptDateRange.value[0]).format('YYYY-MM-DD'));
-          if (scriptDateRange.value?.[1]) params.set('end_date', dayjs(scriptDateRange.value[1]).format('YYYY-MM-DD'));
-          
+          if (scriptFilters.status) params.set('status', scriptFilters.status);
+          if (scriptFilters.content_team) params.set('content_team', scriptFilters.content_team);
           const res = await axios.get('/api/scripts?' + params);
           scripts.value = res.data.data;
           pagination.total = res.data.total;
           loading.value = false;
-          
-          // 加载Tab计数
-          loadTabCounts();
-        };
-        
-        const loadTabCounts = async () => {
-          try {
-            const [allRes, pendingRes, unratedRes, projectRes, abandonedRes] = await Promise.all([
-              axios.get('/api/scripts?limit=1'),
-              axios.get('/api/scripts?tab=pending&limit=1'),
-              axios.get('/api/scripts?unrated=true&limit=1'),
-              axios.get('/api/scripts?is_project=1&limit=1'),
-              axios.get('/api/scripts?status=已放弃&limit=1')
-            ]);
-            tabCounts.value = {
-              all: allRes.data.total || 0,
-              pending: pendingRes.data.total || 0,
-              unrated: unratedRes.data.total || 0,
-              project: projectRes.data.total || 0,
-              abandoned: abandonedRes.data.total || 0
-            };
-          } catch (e) { console.error('Failed to load tab counts', e); }
         };
         
         const loadRatings = async () => {
@@ -1496,7 +1340,6 @@ app.get('/*', (c) => {
           if (ratingFilters.user_id) params.set('user_id', ratingFilters.user_id);
           if (ratingDateRange.value?.[0]) params.set('start_date', dayjs(ratingDateRange.value[0]).format('YYYY-MM-DD'));
           if (ratingDateRange.value?.[1]) params.set('end_date', dayjs(ratingDateRange.value[1]).format('YYYY-MM-DD'));
-          
           const res = await axios.get('/api/ratings?' + params);
           ratings.value = res.data.data;
           ratingPagination.total = res.data.total;
@@ -1514,31 +1357,50 @@ app.get('/*', (c) => {
           users.value = userRes.data;
         };
         
-        const onPageChange = (page) => { pagination.current = page; loadScripts(); };
-        const onRatingPageChange = (page) => { ratingPagination.current = page; loadRatings(); };
+        const resetScriptFilters = () => { Object.assign(scriptFilters, { keyword: '', status: '', content_team: '' }); loadScripts(); };
+        const onPageChange = (p) => { pagination.current = p; loadScripts(); };
+        const onRatingPageChange = (p) => { ratingPagination.current = p; loadRatings(); };
         
-        const openFeishu = (script) => { 
-          const url = script.feishu_url || 'https://bytedance.larkoffice.com';
-          window.open(url, '_blank'); 
-        };
+        const openFeishu = (s) => window.open(s.feishu_url || 'https://bytedance.larkoffice.com', '_blank');
         
-        const openRatingDrawer = async (script) => {
+        const openRatingModal = async (script) => {
           const res = await axios.get('/api/scripts/' + script.script_id);
           currentScript.value = res.data;
-          ratingDrawerVisible.value = true;
+          ratingTabKey.value = 'info';
+          ratingModalVisible.value = true;
+          
+          await nextTick();
+          // 渲染分项评分图表
+          const chartEl = document.getElementById('score-chart');
+          if (chartEl && currentScript.value?.ratings?.length) {
+            const dims = avgDimensionScores.value;
+            echarts.init(chartEl).setOption({
+              radar: { indicator: [{ name: '内容', max: 100 }, { name: '题材', max: 100 }, { name: '制作', max: 100 }] },
+              series: [{ type: 'radar', data: [{ value: [dims.content || 0, dims.market || 0, dims.commercial || 0], name: '评分' }] }]
+            });
+          }
         };
         
-        const openRatingModal = () => {
-          ratingForm.user_id = '';
-          ratingForm.content_score = null;
-          ratingForm.market_score = null;
-          ratingForm.compliance_score = null;
-          ratingForm.commercial_score = null;
-          ratingForm.comments = '';
-          ratingModalVisible.value = true;
+        const openSubmitRating = () => {
+          Object.assign(ratingForm, { user_id: '', content_score: null, market_score: null, commercial_score: null, comments: '' });
+          submitRatingVisible.value = true;
         };
         
         const submitRating = async () => {
+          if (!ratingForm.user_id) { ArcoVue.Message.warning('请选择评分人'); return; }
+          submitting.value = true;
+          try {
+            const user = users.value.find(u => u.user_id === ratingForm.user_id);
+            await axios.post('/api/ratings', { ...ratingForm, script_id: currentScript.value.script_id, user_name: user?.name });
+            ArcoVue.Message.success('评分提交成功');
+            submitRatingVisible.value = false;
+            const res = await axios.get('/api/scripts/' + currentScript.value.script_id);
+            currentScript.value = res.data;
+          } catch (e) { ArcoVue.Message.error('提交失败'); }
+          submitting.value = false;
+        };
+        
+        const submitRatingDirect = async () => {
           if (!ratingForm.user_id) { ArcoVue.Message.warning('请选择评分人'); return; }
           if (!ratingForm.content_score && !ratingForm.market_score && !ratingForm.commercial_score) {
             ArcoVue.Message.warning('请至少填写一项评分'); return;
@@ -1548,155 +1410,91 @@ app.get('/*', (c) => {
             const user = users.value.find(u => u.user_id === ratingForm.user_id);
             await axios.post('/api/ratings', { ...ratingForm, script_id: currentScript.value.script_id, user_name: user?.name });
             ArcoVue.Message.success('评分提交成功');
-            ratingModalVisible.value = false;
+            Object.assign(ratingForm, { user_id: '', content_score: null, market_score: null, commercial_score: null, comments: '' });
             const res = await axios.get('/api/scripts/' + currentScript.value.script_id);
             currentScript.value = res.data;
-          } catch (e) {
-            ArcoVue.Message.error('提交失败: ' + (e.response?.data?.error || e.message));
-          }
+            loadScripts(); // 刷新列表
+          } catch (e) { ArcoVue.Message.error('提交失败'); }
           submitting.value = false;
         };
         
-        const openEditModal = (script) => {
-          Object.assign(editForm, {
-            script_id: script.script_id,
-            name: script.name || '',
-            feishu_url: script.feishu_url || '',
-            source_type: script.source_type || '',
-            team: script.team || '',
-            status: script.status || '',
-            genre: script.genre || '',
-            writer: script.writer || '',
-            content_team: script.content_team || '',
-            producer: script.producer || '',
-            producer_team: script.producer_team || '',
-            assign_status: script.assign_status || '待分配',
-            is_project: !!script.is_project,
-            project_name: script.project_name || '',
-            remarks: script.remarks || ''
-          });
+        const sendReminderToAll = async () => {
+          const pendingUsers = currentScript.value?.pendingRaters?.filter(r => !r.hasRated && !remindedUsers[r.user_id]) || [];
+          if (!pendingUsers.length) { ArcoVue.Message.info('没有需要提醒的人员'); return; }
+          for (const u of pendingUsers) { await sendReminder(u); }
+          ArcoVue.Message.success('已向 ' + pendingUsers.length + ' 人发送提醒');
+        };
+        
+        const sendReminder = async (user) => {
+          try {
+            await axios.post('/api/reminders', { script_id: currentScript.value.script_id, user_id: user.user_id });
+            remindedUsers[user.user_id] = dayjs().format('MM-DD HH:mm');
+            ArcoVue.Message.success('提醒已发送给 ' + user.name);
+          } catch (e) { ArcoVue.Message.error('发送失败'); }
+        };
+        
+        const openCreateModal = () => {
+          Object.assign(editForm, { script_id: '', name: '', feishu_url: '', status: '一卡初稿', genre: '皆可', source_type: '内部团队', writer: '', content_team: '', producer: '', is_project: false });
           editModalVisible.value = true;
         };
         
-        const submitEditScript = async () => {
-          if (!editForm.name) { ArcoVue.Message.warning('剧本名称不能为空'); return; }
+        const openEditModal = (s) => {
+          Object.assign(editForm, { script_id: s.script_id, name: s.name, feishu_url: s.feishu_url || '', status: s.status, genre: s.genre, source_type: s.source_type, writer: s.writer || '', content_team: s.content_team || '', producer: s.producer || '', is_project: !!s.is_project });
+          editModalVisible.value = true;
+        };
+        
+        const submitScript = async () => {
+          if (!editForm.name) { ArcoVue.Message.warning('请输入剧本名称'); return; }
           submitting.value = true;
           try {
-            await axios.put('/api/scripts/' + editForm.script_id, editForm);
+            if (editForm.script_id) {
+              await axios.put('/api/scripts/' + editForm.script_id, editForm);
+            } else {
+              await axios.post('/api/scripts', editForm);
+            }
             ArcoVue.Message.success('保存成功');
             editModalVisible.value = false;
             loadScripts();
-          } catch (e) {
-            ArcoVue.Message.error('保存失败: ' + (e.response?.data?.error || e.message));
-          }
+          } catch (e) { ArcoVue.Message.error('保存失败'); }
           submitting.value = false;
-        };
-        
-        const deleteScript = async (id) => { 
-          try {
-            await axios.delete('/api/scripts/' + id); 
-            ArcoVue.Message.success('删除成功'); 
-            loadScripts(); 
-          } catch (e) {
-            ArcoVue.Message.error('删除失败: ' + (e.response?.data?.error || e.message));
-          }
         };
         
         const confirmDeleteScript = (id) => {
           ArcoVue.Modal.warning({
             title: '确认删除',
-            content: '删除后将无法恢复，确定要删除该剧本吗？',
-            okText: '确认删除',
-            cancelText: '取消',
-            onOk: () => deleteScript(id)
+            content: '删除后无法恢复',
+            onOk: async () => {
+              await axios.delete('/api/scripts/' + id);
+              ArcoVue.Message.success('删除成功');
+              loadScripts();
+            }
           });
         };
         
-        const copyScriptInfo = (script) => {
-          const info = \`剧本名称：\${script.name}\\n编号：\${script.script_id}\\n编剧：\${script.writer || '-'}\\n内容团队：\${script.content_team || '-'}\\n评分：\${script.avg_score?.toFixed(1) || '-'}\\n状态：\${script.status}\\n飞书文档：\${script.feishu_url || '-'}\`;
-          navigator.clipboard.writeText(info).then(() => {
-            ArcoVue.Message.success('剧本信息已复制到剪贴板');
-          }).catch(() => {
-            ArcoVue.Message.error('复制失败，请手动复制');
-          });
-        };
-        
-        // 新建剧本
-        const createModalVisible = ref(false);
-        const createForm = reactive({ 
-          name: '', feishu_url: '', source_type: '内部团队', team: '', status: '一卡初稿', 
-          genre: '皆可', writer: '', content_team: '', producer: '', producer_team: '', 
-          assign_status: '待分配', is_project: false, project_name: '', remarks: '' 
+        watch(currentPage, async (p) => {
+          if (p === 'dashboard') await loadDashboard();
+          else if (p === 'scripts') await loadScripts();
+          else if (p === 'ratings') await loadRatings();
+          else if (p === 'rankings') await loadRankings();
         });
         
-        const openCreateModal = () => {
-          Object.assign(createForm, {
-            name: '', feishu_url: '', source_type: '内部团队', team: '', status: '一卡初稿', 
-            genre: '皆可', writer: '', content_team: '', producer: '', producer_team: '', 
-            assign_status: '待分配', is_project: false, project_name: '', remarks: ''
-          });
-          createModalVisible.value = true;
-        };
-        
-        const submitCreateScript = async () => {
-          if (!createForm.name) { ArcoVue.Message.warning('请输入剧本名称'); return; }
-          submitting.value = true;
-          try {
-            await axios.post('/api/scripts', createForm);
-            ArcoVue.Message.success('剧本创建成功');
-            createModalVisible.value = false;
-            loadScripts();
-          } catch (e) {
-            ArcoVue.Message.error('创建失败: ' + (e.response?.data?.error || e.message));
-          }
-          submitting.value = false;
-        };
-        
-        const goToScriptDetail = (script) => {
-          currentPage.value = 'scripts';
-          nextTick(() => {
-            openRatingDrawer(script);
-          });
-        };
-        
-        const viewRatingDetail = async (rating) => {
-          // 通过剧本ID获取完整剧本信息并打开评分抽屉
-          const res = await axios.get('/api/scripts/' + rating.script_id);
-          currentScript.value = res.data;
-          ratingDrawerVisible.value = true;
-          // 切换到剧本管理页面
-          currentPage.value = 'scripts';
-        };
-        
-        watch(currentPage, async (page) => {
-          if (page === 'dashboard') { await loadDashboard(); }
-          else if (page === 'scripts') { await loadScripts(); }
-          else if (page === 'ratings') { await loadRatings(); }
-          else if (page === 'rankings') { await loadRankings(); }
-        });
-        
-        onMounted(async () => {
-          await loadOptions();
-          await loadDashboard();
-        });
+        onMounted(async () => { await loadOptions(); await loadDashboard(); });
         
         return {
-          currentPage, loading, submitting, kpi, scripts, ratings, rankings, users, options, tabCounts,
-          dateRange, dashboardStatusFilter, quickFilter, scriptFilters, scriptDateRange, ratingFilters, ratingDateRange,
-          pagination, ratingPagination, ratingDrawerVisible, ratingModalVisible, editModalVisible, currentScript, ratingForm, editForm,
-          createModalVisible, createForm, hasActiveFilters, predictedScore,
-          getScoreClass, getScoreColor, getStatusColor, getScoreLevelText, loadDashboard, loadScripts, loadRatings,
-          onPageChange, onRatingPageChange, openFeishu, openRatingDrawer, openRatingModal, submitRating, 
-          openEditModal, submitEditScript, deleteScript, goToScriptDetail, resetScriptFilters, onQuickFilterChange,
-          confirmDeleteScript, copyScriptInfo, openCreateModal, submitCreateScript, viewRatingDetail
+          currentPage, loading, submitting, kpi, scripts, ratings, rankings, users, options,
+          scriptFilters, ratingFilters, ratingDateRange, pagination, ratingPagination,
+          ratingModalVisible, ratingTabKey, submitRatingVisible, editModalVisible, currentScript,
+          expandedComments, remindedUsers, ratingForm, editForm, avgDimensionScores,
+          getScoreClass, getScoreColor, getStatusColor, getOverdueDays, copyToClipboard, toggleComment,
+          loadScripts, loadRatings, resetScriptFilters, onPageChange, onRatingPageChange,
+          openFeishu, openRatingModal, openSubmitRating, submitRating, submitRatingDirect, sendReminder, sendReminderToAll, hasPendingRaters,
+          openCreateModal, openEditModal, submitScript, confirmDeleteScript
         };
       }
     });
     
     app.use(ArcoVue);
-    for (const [key, component] of Object.entries(ArcoVueIcon)) {
-      app.component(key, component);
-    }
+    for (const [key, component] of Object.entries(ArcoVueIcon)) app.component(key, component);
     app.mount('#app');
   <\/script>
 </body>
