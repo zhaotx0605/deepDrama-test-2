@@ -1,0 +1,263 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" 
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.deepdrama.mapper.ScriptMapper">
+    
+    <!-- 结果映射 -->
+    <resultMap id="BaseResultMap" type="com.deepdrama.entity.Script">
+        <id column="id" property="id"/>
+        <result column="script_id" property="scriptId"/>
+        <result column="name" property="name"/>
+        <result column="preview" property="preview"/>
+        <result column="file_url" property="fileUrl"/>
+        <result column="tags" property="tags"/>
+        <result column="source_type" property="sourceType"/>
+        <result column="team" property="team"/>
+        <result column="status" property="status"/>
+        <result column="genre" property="genre"/>
+        <result column="content_type" property="contentType"/>
+        <result column="is_project" property="isProject"/>
+        <result column="project_owner" property="projectOwner"/>
+        <result column="project_name" property="projectName"/>
+        <result column="remarks" property="remarks"/>
+        <result column="submit_user" property="submitUser"/>
+        <result column="writer" property="writer"/>
+        <result column="content_team" property="contentTeam"/>
+        <result column="producer" property="producer"/>
+        <result column="producer_team" property="producerTeam"/>
+        <result column="feishu_url" property="feishuUrl"/>
+        <result column="assign_status" property="assignStatus"/>
+        <result column="submit_date" property="submitDate"/>
+        <result column="avg_score" property="avgScore"/>
+        <result column="rating_count" property="ratingCount"/>
+        <result column="created_at" property="createdAt"/>
+        <result column="updated_at" property="updatedAt"/>
+    </resultMap>
+    
+    <!-- 基础查询条件 -->
+    <sql id="BaseWhereClause">
+        <where>
+            <if test="query.tab != null and query.tab == 'pending'">
+                AND rating_count = 0
+            </if>
+            <if test="query.tab != null and query.tab == 'claimed'">
+                AND assign_status = '待认领'
+            </if>
+            <if test="query.tab != null and query.tab == 'project'">
+                AND is_project = 1
+            </if>
+            <if test="query.tab != null and query.tab == 'abandoned'">
+                AND status = '已废弃'
+            </if>
+            <if test="query.unrated != null and query.unrated">
+                AND rating_count = 0
+            </if>
+            <if test="query.assignStatus != null and query.assignStatus != ''">
+                AND assign_status = #{query.assignStatus}
+            </if>
+            <if test="query.statuses != null and query.statuses.size() > 0">
+                AND status IN
+                <foreach item="item" collection="query.statuses" open="(" separator="," close=")">
+                    #{item}
+                </foreach>
+            </if>
+            <if test="query.sourceType != null and query.sourceType != ''">
+                AND source_type = #{query.sourceType}
+            </if>
+            <if test="query.genre != null and query.genre != ''">
+                AND genre = #{query.genre}
+            </if>
+            <if test="query.team != null and query.team != ''">
+                AND team = #{query.team}
+            </if>
+            <if test="query.contentTeam != null and query.contentTeam != ''">
+                AND content_team = #{query.contentTeam}
+            </if>
+            <if test="query.producerTeam != null and query.producerTeam != ''">
+                AND producer_team = #{query.producerTeam}
+            </if>
+            <if test="query.isProject != null">
+                AND is_project = #{query.isProject}
+            </if>
+            <if test="query.keyword != null and query.keyword != ''">
+                AND (name LIKE CONCAT('%', #{query.keyword}, '%') 
+                     OR script_id LIKE CONCAT('%', #{query.keyword}, '%')
+                     OR writer LIKE CONCAT('%', #{query.keyword}, '%'))
+            </if>
+            <if test="query.startDate != null and query.startDate != ''">
+                AND submit_date &gt;= #{query.startDate}
+            </if>
+            <if test="query.endDate != null and query.endDate != ''">
+                AND submit_date &lt;= #{query.endDate}
+            </if>
+            <if test="query.minScore != null">
+                AND avg_score &gt;= #{query.minScore}
+            </if>
+            <if test="query.maxScore != null">
+                AND avg_score &lt;= #{query.maxScore}
+            </if>
+        </where>
+    </sql>
+    
+    <!-- 查询列表 -->
+    <select id="selectList" resultMap="BaseResultMap">
+        SELECT * FROM scripts
+        <include refid="BaseWhereClause"/>
+        <choose>
+            <when test="query.sortBy != null and query.sortBy == 'avgScore'">
+                ORDER BY avg_score ${query.sortOrder}
+            </when>
+            <when test="query.sortBy != null and query.sortBy == 'submitDate'">
+                ORDER BY submit_date ${query.sortOrder}
+            </when>
+            <when test="query.sortBy != null and query.sortBy == 'ratingCount'">
+                ORDER BY rating_count ${query.sortOrder}
+            </when>
+            <when test="query.sortBy != null and query.sortBy == 'name'">
+                ORDER BY name ${query.sortOrder}
+            </when>
+            <otherwise>
+                ORDER BY created_at DESC
+            </otherwise>
+        </choose>
+        LIMIT #{query.offset}, #{query.limit}
+    </select>
+    
+    <!-- 查询总数 -->
+    <select id="selectCount" resultType="long">
+        SELECT COUNT(*) FROM scripts
+        <include refid="BaseWhereClause"/>
+    </select>
+    
+    <!-- 根据ID查询 -->
+    <select id="selectById" resultMap="BaseResultMap">
+        SELECT * FROM scripts WHERE id = #{id}
+    </select>
+    
+    <!-- 根据剧本编号查询 -->
+    <select id="selectByScriptId" resultMap="BaseResultMap">
+        SELECT * FROM scripts WHERE script_id = #{scriptId}
+    </select>
+    
+    <!-- 插入剧本 -->
+    <insert id="insert" useGeneratedKeys="true" keyProperty="script.id">
+        INSERT INTO scripts (
+            script_id, name, preview, file_url, tags, source_type, team, status, 
+            genre, content_type, is_project, project_owner, project_name, remarks, 
+            submit_user, writer, content_team, producer, producer_team, feishu_url, 
+            assign_status, submit_date, avg_score, rating_count, created_at, updated_at
+        ) VALUES (
+            #{script.scriptId}, #{script.name}, #{script.preview}, #{script.fileUrl}, 
+            #{script.tags}, #{script.sourceType}, #{script.team}, #{script.status}, 
+            #{script.genre}, #{script.contentType}, #{script.isProject}, #{script.projectOwner}, 
+            #{script.projectName}, #{script.remarks}, #{script.submitUser}, #{script.writer}, 
+            #{script.contentTeam}, #{script.producer}, #{script.producerTeam}, #{script.feishuUrl}, 
+            #{script.assignStatus}, #{script.submitDate}, #{script.avgScore}, #{script.ratingCount},
+            NOW(), NOW()
+        )
+    </insert>
+    
+    <!-- 更新剧本 -->
+    <update id="update">
+        UPDATE scripts SET
+            name = #{script.name},
+            preview = #{script.preview},
+            file_url = #{script.fileUrl},
+            tags = #{script.tags},
+            source_type = #{script.sourceType},
+            team = #{script.team},
+            status = #{script.status},
+            genre = #{script.genre},
+            content_type = #{script.contentType},
+            is_project = #{script.isProject},
+            project_owner = #{script.projectOwner},
+            project_name = #{script.projectName},
+            remarks = #{script.remarks},
+            submit_user = #{script.submitUser},
+            writer = #{script.writer},
+            content_team = #{script.contentTeam},
+            producer = #{script.producer},
+            producer_team = #{script.producerTeam},
+            feishu_url = #{script.feishuUrl},
+            assign_status = #{script.assignStatus},
+            submit_date = #{script.submitDate},
+            updated_at = NOW()
+        WHERE id = #{script.id}
+    </update>
+    
+    <!-- 删除剧本 -->
+    <delete id="deleteById">
+        DELETE FROM scripts WHERE id = #{id}
+    </delete>
+    
+    <!-- 获取状态分布 -->
+    <select id="getStatusDistribution" resultType="map">
+        SELECT status, COUNT(*) as count
+        FROM scripts
+        WHERE 1=1
+        <if test="startDate != null and startDate != ''">
+            AND submit_date &gt;= #{startDate}
+        </if>
+        <if test="endDate != null and endDate != ''">
+            AND submit_date &lt;= #{endDate}
+        </if>
+        GROUP BY status
+    </select>
+    
+    <!-- 获取来源分布 -->
+    <select id="getSourceDistribution" resultType="map">
+        SELECT source_type, COUNT(*) as count
+        FROM scripts
+        WHERE 1=1
+        <if test="startDate != null and startDate != ''">
+            AND submit_date &gt;= #{startDate}
+        </if>
+        <if test="endDate != null and endDate != ''">
+            AND submit_date &lt;= #{endDate}
+        </if>
+        GROUP BY source_type
+    </select>
+    
+    <!-- 获取团队分布 -->
+    <select id="getTeamDistribution" resultType="map">
+        SELECT 
+            content_team as team, 
+            COUNT(*) as count, 
+            AVG(avg_score) as avgScore
+        FROM scripts
+        WHERE content_team IS NOT NULL AND content_team != ''
+        <if test="startDate != null and startDate != ''">
+            AND submit_date &gt;= #{startDate}
+        </if>
+        <if test="endDate != null and endDate != ''">
+            AND submit_date &lt;= #{endDate}
+        </if>
+        GROUP BY content_team
+        ORDER BY count DESC
+    </select>
+    
+    <!-- 获取内容团队选项 -->
+    <select id="getContentTeamOptions" resultType="string">
+        SELECT DISTINCT content_team 
+        FROM scripts 
+        WHERE content_team IS NOT NULL AND content_team != ''
+        ORDER BY content_team
+    </select>
+    
+    <!-- 获取编剧选项 -->
+    <select id="getWriterOptions" resultType="string">
+        SELECT DISTINCT writer 
+        FROM scripts 
+        WHERE writer IS NOT NULL AND writer != ''
+        ORDER BY writer
+    </select>
+    
+    <!-- 获取制片选项 -->
+    <select id="getProducerOptions" resultType="string">
+        SELECT DISTINCT producer 
+        FROM scripts 
+        WHERE producer IS NOT NULL AND producer != ''
+        ORDER BY producer
+    </select>
+    
+</mapper>

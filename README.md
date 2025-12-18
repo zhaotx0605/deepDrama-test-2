@@ -1,256 +1,336 @@
-# DeepDrama - 短剧内容评分系统
+# DeepDrama 短剧评分系统 - 重构工程
 
-## 项目概述
-- **名称**: DeepDrama
-- **目标**: 为短剧内容团队提供专业的剧本筛选和评估工具，覆盖剧本管理、多维度评分、数据可视化、排名统计全流程
-- **技术栈**: Hono + TypeScript + Cloudflare D1 (SQLite) + Vue 3 + Arco Design + ECharts 5.x
+## 📦 工程说明
 
-## 访问地址
-- **开发环境**: https://3000-igexgvecwlovi6ux7od6z-6532622b.e2b.dev
-- **剧本概览**: / (默认首页)
-- **剧本管理**: /scripts
-- **评分记录**: /ratings
-- **剧本排行**: /rankings
+本工程是 **DeepDrama 短剧评分系统** 的完整重构版本,严格按照 `短剧评分系统-开发规范.md` 要求实现。
 
-## 功能模块
+### 技术栈
 
-### 1. 剧本概览 (首页)
-- **核心KPI指标**: 
-  - 总剧本数（主要指标）
-  - 立项数
-  - 待分配数
-  - 平均评分
-- **投稿日期筛选**: 支持日期范围筛选，默认不限日期
-- **可视化图表**:
-  - 剧本状态分布饼图（一卡/全本等）
-  - 内容团队统计柱状图（含剧本数量和平均分折线）
+**后端:**
+- Spring Boot 2.7.18
+- MyBatis 2.3.2
+- MySQL 8.0
+- Alibaba FastJSON 1.2.83
+- Java 8 (JDK 1.8) - 严格遵守
 
-### 2. 剧本管理
-- **Tab切换**: 全部 / 待评分 / 待认领 / 已立项 / 已放弃
-- **详细筛选**: 剧本状态、内容团队、内容类型(男频/女频)、关键词、投稿日期、评分区间
-- **表格布局** (15个字段，首末列冻结):
-  - **首列冻结**: 剧本编号(100px)、剧本名称(200px，超长显示省略+tooltip)
-  - **中间列**: 综合评分(90px，颜色徽章)、评分人数(90px)、剧本状态(100px，颜色标签)、立项状态(90px，已立项/未立项)、项目归属(100px)、编剧(80px)、内容团队(90px)、制片(80px)、制片团队(90px)、类型(70px)、付费类型(80px)、提交日期(110px)、备注(150px，tooltip)
-  - **末列冻结**: 操作(180px)
-- **视觉优化**:
-  - 斑马纹行 + hover高亮
-  - 单元格边框清晰分隔
-  - 评分颜色编码: ≥80绿色, ≥70蓝色, ≥60橙色, <60红色
-- **操作功能**:
-  - 看剧本：新标签页打开飞书文档
-  - 去评分：右侧抽屉显示评分详情
-  - 更多：编辑、复制信息、删除
+**前端:**
+- Vue 3.4
+- TypeScript 5.3
+- Arco Design Vue 2.55
+- Vite 5.0
+- Axios 1.6
 
-### 3. 评分抽屉
-- **宽度**: 页面的1/3
-- **顶部信息**: 剧本详细信息卡片（编号、编剧、团队、类型等）
-- **综合评分**: 突出显示大字体评分
-- **评分记录列表**: 
-  - 按评分时间降序排列
-  - 显示评分人头像、姓名、角色标签（主编/制片/内容/评审）
-  - 各维度分数（内容/题材/制作）
-  - 评语内容
-- **去评分按钮**: 右上角，点击打开评分弹框
+---
 
-### 4. 评分记录页面
-- **筛选功能**: 评分人、日期范围
-- **表格布局** (10个字段，首末列冻结):
-  - **首列冻结**: 剧本编号(100px)、剧本名称(180px)
-  - **中间列**: 评分人(100px)、角色(90px，颜色标签)、内容评分(90px，颜色样式)、题材评分(90px，颜色样式)、制作评分(90px，颜色样式)、综合评分(100px，颜色徽章)、评分日期(110px)、评语备注(200px，tooltip)
-  - **末列冻结**: 操作(100px)
-- **视觉优化**:
-  - 斑马纹行 + hover高亮
-  - 单元格边框清晰分隔
-  - 评分颜色编码显示
+## 📁 目录结构
 
-### 5. 剧本排行榜
-- **展示规则**: Top 50，按综合评分降序
-- **视觉标识**: 前三名显示🥇🥈🥉
-- **展示信息**: 排名、剧本名、评分、评分人数、各维度均分
-- **操作**: 查看详情（跳转至剧本管理页打开评分抽屉）
+```
+deepdrama-refactor/
+├── backend/                    # Spring Boot后端工程
+│   ├── src/main/java/          # Java源码
+│   │   └── com/deepdrama/
+│   │       ├── controller/     # Controller层(REST API)
+│   │       ├── service/        # Service层(业务逻辑)
+│   │       ├── mapper/         # Mapper层(数据访问)
+│   │       ├── entity/         # 实体类
+│   │       ├── query/          # 查询条件类
+│   │       └── common/         # 公共类(Result, PageResult)
+│   ├── src/main/resources/
+│   │   ├── application.yml     # 配置文件
+│   │   └── mapper/             # MyBatis XML映射文件
+│   ├── database/
+│   │   └── schema.sql          # 数据库结构SQL
+│   └── pom.xml                 # Maven依赖配置
+│
+├── frontend/                   # Vue 3前端工程
+│   ├── src/
+│   │   ├── views/              # 页面组件
+│   │   ├── components/         # 通用组件
+│   │   ├── api/                # API封装(Axios)
+│   │   ├── types/              # TypeScript类型定义
+│   │   └── utils/              # 工具函数
+│   ├── package.json
+│   ├── vite.config.ts
+│   └── tsconfig.json
+│
+├── 重构指南.md                  # 完整重构指南文档
+└── README.md                   # 本文件
+```
 
-## API接口
+---
 
-### 看板API
-| 接口 | 方法 | 参数 | 说明 |
-|-----|------|-----|-----|
-| /api/dashboard/kpi | GET | start_date, end_date | 获取KPI指标 |
-| /api/dashboard/status-distribution | GET | start_date, end_date | 状态分布 |
-| /api/dashboard/team-distribution | GET | start_date, end_date | 团队统计 |
+## 🚀 快速开始
 
-### 剧本API
-| 接口 | 方法 | 说明 |
-|-----|------|-----|
-| /api/scripts | GET | 列表（支持tab/status/content_team/genre/keyword/日期筛选/分页） |
-| /api/scripts/:id | GET | 详情（含评分记录，按时间降序） |
-| /api/scripts | POST | 创建剧本 |
-| /api/scripts/:id | PUT | 更新剧本 |
-| /api/scripts/:id | DELETE | 删除剧本及其评分 |
-
-### 评分API
-| 接口 | 方法 | 说明 |
-|-----|------|-----|
-| /api/ratings | GET | 列表（支持script_id/user_id/日期/分数筛选） |
-| /api/ratings | POST | 创建评分（自动计算综合分，更新剧本平均分） |
-| /api/ratings/:id | PUT | 更新评分（未锁定记录） |
-
-### 其他API
-| 接口 | 方法 | 说明 |
-|-----|------|-----|
-| /api/rankings | GET | Top50排行榜（含各维度均分） |
-| /api/users | GET | 用户列表 |
-| /api/options | GET | 筛选选项（团队/状态/编剧/制片等） |
-
-## 数据模型
-
-### Scripts (剧本表)
-| 字段 | 类型 | 说明 |
-|-----|------|-----|
-| script_id | TEXT | 剧本编号(SP001格式) |
-| name | TEXT | 剧本名称 |
-| writer | TEXT | 所属编剧 |
-| content_team | TEXT | 内容团队(晓娜组/宗霖组等) |
-| producer | TEXT | 所属制片 |
-| producer_team | TEXT | 制片团队 |
-| team | TEXT | 所属团队(剧无敌/剧出圈等) |
-| status | TEXT | 剧本状态(一卡/全本等) |
-| genre | TEXT | 内容类型(男频/女频/皆可) |
-| content_type | TEXT | 付费类型(付费/红果) |
-| is_project | INTEGER | 是否立项 |
-| project_name | TEXT | 立项项目名称 |
-| feishu_url | TEXT | 飞书文档URL |
-| assign_status | TEXT | 分配状态(待分配/已分配) |
-| avg_score | REAL | 平均评分 |
-| rating_count | INTEGER | 评分人数 |
-
-### Ratings (评分表)
-| 字段 | 类型 | 说明 |
-|-----|------|-----|
-| script_id | TEXT | 关联剧本ID |
-| user_id | TEXT | 评分人ID |
-| user_name | TEXT | 评分人姓名 |
-| user_role | TEXT | 评分人角色 |
-| content_score | INTEGER | 内容评分(0-100) |
-| market_score | INTEGER | 题材评分(0-100) |
-| commercial_score | INTEGER | 制作评分(0-100) |
-| total_score | REAL | 综合评分(自动计算) |
-| comments | TEXT | 评分意见 |
-| is_locked | INTEGER | 是否锁定 |
-| rating_date | DATE | 评分日期 |
-
-### Users (用户表)
-| 字段 | 类型 | 说明 |
-|-----|------|-----|
-| user_id | TEXT | 用户ID |
-| name | TEXT | 姓名 |
-| role_type | TEXT | 角色类型(主编/制片/内容/评审) |
-| department | TEXT | 部门 |
-
-## 数据统计
-- **用户数**: 9人
-- **剧本数**: 55个
-- **评分记录数**: 479条
-- **立项数**: 21个
-- **待分配**: 8个
-- **平均评分**: 65.1分
-
-## 本地开发
+### 1. 后端启动
 
 ```bash
+# 进入后端目录
+cd backend
+
+# 配置数据库(修改application.yml)
+vim src/main/resources/application.yml
+# 修改数据库连接: url, username, password
+
+# 导入数据库结构
+mysql -u root -p < database/schema.sql
+
+# Maven打包
+mvn clean package
+
+# 运行
+java -jar target/score-system-1.0.0.jar
+
+# 后端API运行在: http://localhost:8080/api
+```
+
+### 2. 前端启动
+
+```bash
+# 进入前端目录
+cd frontend
+
 # 安装依赖
 npm install
 
-# 初始化数据库
-npm run db:migrate:local
-npm run db:seed
+# 开发模式
+npm run dev
 
-# 构建项目
-npm run build
-
-# 启动开发服务
-npm run dev:sandbox
-
-# 或使用PM2
-pm2 start ecosystem.config.cjs
+# 访问: http://localhost:3000
 ```
 
-## 部署到Cloudflare Pages
+---
 
-```bash
-# 创建D1数据库
-npx wrangler d1 create deepdrama-production
+## 📋 已实现功能
 
-# 应用迁移
-npm run db:migrate:prod
+### 后端实现 ✅
 
-# 部署
-npm run deploy:prod
+1. **基础框架**
+   - [x] Spring Boot工程结构
+   - [x] MyBatis配置
+   - [x] 统一响应结果 `Result<T>`
+   - [x] 分页结果 `PageResult<T>`
+
+2. **实体类和数据库**
+   - [x] Script实体类(剧本)
+   - [x] Rating实体类(评分)
+   - [x] MySQL数据库表结构
+   - [x] 触发器(自动更新平均分)
+
+3. **Mapper层**
+   - [x] ScriptMapper接口和XML
+   - [x] 支持复杂筛选条件
+   - [x] 多选状态筛选
+   - [x] 关键词搜索
+   - [x] 分页排序
+
+4. **Service层**
+   - [x] ScriptService接口和实现
+   - [x] 使用FastJSON解析参数
+   - [x] 事务管理
+
+5. **Controller层**
+   - [x] ScriptController
+   - [x] RESTful API设计
+   - [x] 统一异常处理
+
+### 前端实现 ✅
+
+1. **基础框架**
+   - [x] Vue 3 + Vite工程结构
+   - [x] TypeScript配置
+   - [x] Arco Design Vue集成
+   - [x] Axios封装和拦截器
+
+2. **API封装**
+   - [x] request.ts(Axios封装)
+   - [x] script.ts(剧本API)
+   - [x] 统一响应处理
+
+3. **页面组件**
+   - [x] ScriptManagement.vue(剧本管理)
+   - [x] 严格使用 `<script setup lang="ts">`
+   - [x] 优先使用 `ref` 管理状态
+   - [x] Tab切换筛选
+   - [x] 搜索和高级筛选
+   - [x] 分页功能
+
+---
+
+## 📖 核心文件说明
+
+### 后端核心文件
+
+| 文件路径 | 说明 |
+|---------|------|
+| `backend/pom.xml` | Maven依赖配置,包含Spring Boot、MyBatis、FastJSON |
+| `backend/src/main/java/com/deepdrama/ScoreSystemApplication.java` | 启动类 |
+| `backend/src/main/java/com/deepdrama/common/Result.java` | 统一响应格式 |
+| `backend/src/main/java/com/deepdrama/entity/Script.java` | 剧本实体类 |
+| `backend/src/main/java/com/deepdrama/mapper/ScriptMapper.java` | 剧本Mapper接口 |
+| `backend/src/main/resources/mapper/ScriptMapper.xml` | MyBatis SQL映射 |
+| `backend/src/main/java/com/deepdrama/service/impl/ScriptServiceImpl.java` | 剧本业务逻辑 |
+| `backend/src/main/java/com/deepdrama/controller/ScriptController.java` | 剧本REST API |
+| `backend/database/schema.sql` | MySQL数据库表结构 |
+
+### 前端核心文件
+
+| 文件路径 | 说明 |
+|---------|------|
+| `frontend/package.json` | NPM依赖配置 |
+| `frontend/vite.config.ts` | Vite构建配置 |
+| `frontend/tsconfig.json` | TypeScript配置 |
+| `frontend/src/main.ts` | 应用入口 |
+| `frontend/src/api/request.ts` | Axios封装 |
+| `frontend/src/api/script.ts` | 剧本API封装 |
+| `frontend/src/views/ScriptManagement.vue` | 剧本管理页面 |
+
+---
+
+## 🔧 开发规范要点
+
+### Java后端规范
+
+1. **Java版本**: 严格使用JDK 1.8,禁止Java 9+特性
+   - ❌ 禁止: `var`、`record`、文本块、`switch`表达式
+   - ✅ 正确: 显式类型声明、传统类、字符串拼接
+
+2. **FastJSON强制要求**
+   - ✅ 业务逻辑中必须使用 `com.alibaba.fastjson.JSONObject`
+   - ❌ 禁止手动使用Jackson的ObjectMapper
+
+3. **Controller规范**
+   - `@RestController` + `@RequestMapping`
+   - API路径使用kebab-case
+   - 返回 `Result<T>` 统一格式
+
+4. **Service规范**
+   - 接口/实现分离
+   - `@Transactional` 用于事务管理
+
+5. **Mapper规范**
+   - `@Mapper` 注解
+   - 多参数使用 `@Param`
+   - 复杂SQL写在XML中
+
+### Vue前端规范
+
+1. **组件结构**: 严格使用 `<script setup lang="ts">`
+   - ❌ 禁止: Options API、`<script lang="ts">` + `defineComponent`
+
+2. **状态管理**: 优先使用 `ref`,避免过度使用 `reactive`
+
+3. **UI组件**: 使用 Arco Design Vue (`<a-xxx>`)
+
+4. **API调用**: 使用封装的axios实例,统一错误处理
+
+---
+
+## 📊 API对照表
+
+### 剧本管理API
+
+| 功能 | HTTP方法 | 路径 | 参数类型 |
+|------|---------|------|---------|
+| 剧本列表 | POST | `/api/scripts` | ScriptQuery(JSON) |
+| 剧本详情 | GET | `/api/scripts/{id}` | 路径参数 |
+| 创建剧本 | POST | `/api/scripts/create` | Script(JSON) |
+| 更新剧本 | PUT | `/api/scripts/{id}` | Script(JSON) |
+| 删除剧本 | DELETE | `/api/scripts/{id}` | 路径参数 |
+| 剧本排行 | GET | `/api/scripts/rankings` | limit参数 |
+| 筛选选项 | GET | `/api/scripts/options` | 无 |
+
+### 统一响应格式
+
+```json
+{
+  "success": true,
+  "code": 200,
+  "message": "操作成功",
+  "data": {
+    // 具体数据
+  }
+}
 ```
 
-## 项目结构
-```
-webapp/
-├── src/
-│   └── index.tsx          # Hono后端+前端HTML
-├── migrations/
-│   ├── 0001_initial_schema.sql
-│   └── 0002_add_new_fields.sql
-├── seed.sql               # 测试数据
-├── ecosystem.config.cjs   # PM2配置
-├── wrangler.jsonc         # Cloudflare配置
-├── package.json
-└── vite.config.ts
-```
+---
 
-## 更新日志
-- **2025-12-17 v2**: 
-  - **评分弹框大幅重构**: 
-    - 宽度从800px增加到1200px（约1.5倍）
-    - 拆分为4个独立标签页，支持独立滚动
-  - **标签页1 - 基础信息**: 
-    - 两列网格布局展示剧本详细信息
-    - 显示项目关联人员及其评分状态
-    - 快捷打开飞书文档按钮
-  - **标签页2 - 综合评分**: 
-    - 左右分栏设计
-    - 左侧显示综合评分卡片+分项评分列表
-    - 右侧显示评分分布雷达图
-  - **标签页3 - 已评分记录**: 
-    - 双列卡片布局展示历史评分
-    - 标签页标题显示评分数量
-    - 支持展开/收起评语详情
-  - **标签页4 - 待评分管理**: 
-    - 左侧待评分/已评分人员列表分区展示
-    - 超时天数标注功能
-    - 提醒记录显示
-    - 一键提醒全部待评分人员
-    - 右侧直接嵌入评分表单，无需打开新弹框
-  - **剧本名称+编号合并显示**: 名称在上、编号在下，点击编号复制
-- **2025-12-17 v1**: 
-  - **重构表格布局**: 剧本管理和评分记录表格重新设计
-  - **剧本管理表格**: 15个字段按新顺序排列，首列（编号、名称）和末列（操作）冻结
-  - **评分记录表格**: 10个字段按新顺序排列，首列（编号、名称）和末列（操作）冻结
-  - **左侧菜单优化**: 移除图标，仅显示文字，更简洁
-  - **视觉增强**: 添加斑马纹、单元格边框、评分颜色编码
-  - **新增功能**: 评分记录页面"查看详情"按钮
-- **2025-12-16**: 
-  - 评分抽屉宽度调整为页面1/3
-  - 评分记录按时间降序显示
-  - 评分人旁显示角色标签
-  - 添加完整编辑剧本弹框功能
-  - 优化立项状态显示（✅ + 项目ID + 名称）
-  - 新增Tab切换（全部/待分配）
-  - 投稿日期筛选默认不限
+## 🗄️ 数据库设计
 
-## 待完成功能
-- [ ] 评分趋势图表(日/周/月)
-- [ ] 批量导入剧本
-- [ ] 评分锁定/解锁功能
-- [ ] 用户权限管理
-- [ ] 数据导出功能
+### 核心表结构
 
-## 下一步开发建议
-1. 实现评分趋势图表API和前端展示
-2. 添加批量导入Excel功能
-3. 完善用户角色权限控制
-4. 部署到Cloudflare Pages生产环境
+1. **users** - 用户表
+   - 字段: id, user_id, name, role_type
+
+2. **scripts** - 剧本表
+   - 字段: id, script_id, name, status, source_type, genre, writer, content_team, avg_score, rating_count等
+   - 索引: script_id(唯一), status, source_type, genre, avg_score等
+
+3. **ratings** - 评分记录表
+   - 字段: id, script_id, user_id, content_score, market_score, commercial_score, total_score, comments等
+   - 外键: script_id → scripts.id, user_id → users.id
+
+### 触发器
+
+- `trg_after_rating_insert`: 新增评分后自动更新剧本平均分和评分人数
+- `trg_after_rating_update`: 更新评分后自动更新剧本平均分
+- `trg_after_rating_delete`: 删除评分后自动更新剧本平均分和评分人数
+
+---
+
+## ⚠️ 注意事项
+
+1. **数据迁移**: 需要从原Cloudflare D1数据库导出数据并转换为MySQL格式
+
+2. **环境要求**:
+   - JDK 1.8(不支持更高版本)
+   - Maven 3.6+
+   - MySQL 8.0+
+   - Node.js 16+
+
+3. **配置修改**:
+   - `backend/src/main/resources/application.yml` - 数据库连接信息
+   - `frontend/vite.config.ts` - 后端API代理地址
+
+4. **端口占用**:
+   - 后端: 8080
+   - 前端: 3000
+
+---
+
+## 📚 完整文档
+
+详细的重构步骤、规范说明、测试方法等,请查看:
+
+👉 **[重构指南.md](./重构指南.md)**
+
+---
+
+## 🎯 下一步工作
+
+完整重构工程已创建,包含:
+- ✅ 后端完整代码框架
+- ✅ 前端完整工程结构
+- ✅ 数据库表结构SQL
+- ✅ 核心示例代码
+- ✅ 详细重构指南
+
+**需要在本地环境完成的工作:**
+1. 安装JDK 1.8和MySQL
+2. 从D1导出数据并导入MySQL
+3. 运行后端Spring Boot项目
+4. 运行前端Vue项目
+5. 补全其余页面组件(评分记录、数据看板、排行榜)
+6. 完善评分管理API和Controller
+7. 全面测试功能
+
+---
+
+## 📞 技术支持
+
+如有问题,请参考:
+- [重构指南.md](./重构指南.md) - 详细重构步骤
+- [短剧评分系统-开发规范.md](../短剧评分系统-开发规范.md) - 开发规范
+
+---
+
+**本重构工程严格遵循项目开发规范,确保代码质量和可维护性。**
